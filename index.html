@@ -2097,15 +2097,12 @@
     }
 
     /** Firebase 為唯一真相來源：收到資料就直接更新地圖 */
-    function setNotesFromFirestoreDocs(docs, { force = false } = {}) {
+    function setNotesFromFirestoreDocs(docs) {
       const all = docs.map(mapFirestoreDoc).filter(Boolean);
-      const filtered = all.filter((item) => (item.reportCount || 0) < 3 || isMyNote(item));
-
-      if (!filtered.length && !force && notes.length > 0) {
-        console.warn(`[紙條] Firebase 回傳 ${docs.length} 筆但有效 0 張，保留現有 ${notes.length} 張`);
-        return;
+      if (docs.length > 0 && !all.length) {
+        console.error("[紙條] 有資料但無法解析 location，請檢查 notes 文件");
       }
-
+      const filtered = all.filter((item) => (item.reportCount || 0) < 3 || isMyNote(item));
       notes = sortNotesByActivity(filtered);
       filtered.forEach((note) => {
         if (isMyNote(note)) registerAuthorUid(note.authorUid);
@@ -2115,13 +2112,11 @@
       updateReplyAlert();
     }
 
-    function buildNotesQuery(orderField) {
-      const { collection, query, orderBy, limit } = firebaseApi.firestoreModule;
-      const base = collection(db, "notes");
-      if (orderField) {
-        return query(base, orderBy(orderField, "desc"), limit(MAP_NOTE_LIMIT));
-      }
-      return query(base, limit(MAP_NOTE_LIMIT));
+    function buildNotesQuery() {
+      // 不用 orderBy：舊紙條可能只有 lastDriftAt、沒有 lastActivityAt，
+      // 用 orderBy 會漏掉整批資料。排序改在前端 sortNotesByActivity。
+      const { collection, query, limit } = firebaseApi.firestoreModule;
+      return query(collection(db, "notes"), limit(MAP_NOTE_LIMIT));
     }
 
     function stopNotesListener() {
@@ -2141,43 +2136,23 @@
       if (token !== notesListenerToken) return;
 
       const { onSnapshot } = firebaseApi.firestoreModule;
-      const tryFields = ["lastActivityAt", "createdAt", null];
+      const q = buildNotesQuery();
 
-      function attach(index) {
-        const orderField = tryFields[index];
-        const label = orderField || "plain";
-        const q = buildNotesQuery(orderField);
-
-        return onSnapshot(
-          q,
-          (snapshot) => {
-            if (token !== notesListenerToken) return;
-            console.log(`[紙條] 即時更新 (${label}) ${snapshot.docs.length} 筆`);
-
-            if (snapshot.empty && index < tryFields.length - 1) {
-              console.warn(`[紙條] ${label} 查無資料，換下一種查詢`);
-              notesUnsubscribe = attach(index + 1);
-              return;
-            }
-
-            setNotesFromFirestoreDocs(snapshot.docs, { force: snapshot.empty });
-          },
-          (err) => {
-            if (token !== notesListenerToken) return;
-            console.warn(`[紙條] 監聽 ${label} 失敗`, err);
-            if (index < tryFields.length - 1) {
-              notesUnsubscribe = attach(index + 1);
-            } else {
-              fetchNotesOnce().catch((e) => {
-                console.warn("[紙條] 單次載入失敗", e);
-                showToast("無法讀取紙條，請檢查 Firebase 規則");
-              });
-            }
-          }
-        );
-      }
-
-      notesUnsubscribe = attach(0);
+      notesUnsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          if (token !== notesListenerToken) return;
+          console.log(`[紙條] 即時更新 ${snapshot.docs.length} 筆`);
+          setNotesFromFirestoreDocs(snapshot.docs);
+        },
+        (err) => {
+          if (token !== notesListenerToken) return;
+          console.error("[紙條] 監聽失敗", err);
+          fetchNotesOnce().catch(() => {
+            showToast("無法讀取紙條，請檢查 Firebase 規則");
+          });
+        }
+      );
     }
 
     async function fetchNotesOnce() {
@@ -3639,20 +3614,7 @@
 
       return await withTimeout((async () => {
         const { getDocs } = firebaseApi.firestoreModule;
-        const tryFields = ["lastActivityAt", "createdAt", null];
-        let snapshot = null;
-
-        for (const field of tryFields) {
-          try {
-            snapshot = await getDocs(buildNotesQuery(field));
-            if (!snapshot.empty) break;
-          } catch (err) {
-            console.warn(`[紙條] 查詢 ${field || "plain"} 失敗`, err);
-          }
-        }
-
-        if (!snapshot) return [];
-
+        const snapshot = await getDocs(buildNotesQuery());
         const all = snapshot.docs.map(mapFirestoreDoc).filter(Boolean);
         console.log(`[紙條] 讀到 ${snapshot.docs.length} 筆，地圖可顯示 ${all.length} 張`);
         return sortNotesByActivity(
