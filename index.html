@@ -120,8 +120,9 @@
 
     .splash-scene {
       position: relative;
-      width: 260px;
+      width: 320px;
       height: 120px;
+      overflow: hidden;
     }
 
     .splash-bird {
@@ -130,13 +131,16 @@
       height: 80px;
       top: 20px;
       left: -90px;
-      animation: birdFly 1.2s cubic-bezier(0.3, 0, 0.5, 1) forwards;
+      animation: birdFlyLoop 2.4s linear infinite;
     }
-    @keyframes birdFly {
-      0%   { transform: translateX(0) translateY(0) rotate(-3deg); }
-      30%  { transform: translateX(80px) translateY(-8px) rotate(2deg); }
-      60%  { transform: translateX(200px) translateY(-4px) rotate(-1deg); }
-      100% { transform: translateX(360px) translateY(0) rotate(3deg); }
+    @keyframes birdFlyLoop {
+      0%   { transform: translateX(0) translateY(0) rotate(-3deg); opacity: 0; }
+      6%   { opacity: 1; }
+      30%  { transform: translateX(100px) translateY(-8px) rotate(2deg); }
+      60%  { transform: translateX(220px) translateY(-4px) rotate(-1deg); }
+      88%  { transform: translateX(400px) translateY(0) rotate(3deg); opacity: 1; }
+      94%  { opacity: 0; }
+      100% { transform: translateX(0) translateY(0) rotate(-3deg); opacity: 0; }
     }
 
     .splash-wing {
@@ -1469,7 +1473,8 @@
     */
     const LIFF_ID = "2010143431-l2kcIl8v";
     const DAILY_LIMIT = 10;
-    const MIN_SPLASH_MS = 800;
+    const MIN_SPLASH_MS = 600;
+    const BOOT_TILE_TIMEOUT_MS = 3000;
 
     let hasFirebase = Boolean(
       firebaseConfig.apiKey &&
@@ -1697,13 +1702,13 @@
       currentTileLayer = layer;
       currentTileIndex = index;
 
-      // 雙保險：6 秒內沒有任何瓦片載入成功，直接切下一個
+      // 3 秒內沒有任何瓦片載入成功，直接切下一個
       timeoutId = setTimeout(() => {
         if (!firstTileLoaded) {
-          console.warn(`[圖磚] ${src.name} 6 秒沒回應，切換下一個`);
+          console.warn(`[圖磚] ${src.name} 3 秒沒回應，切換下一個`);
           tryTileSource(index + 1);
         }
-      }, 6000);
+      }, 3000);
     }
 
     tryTileSource(0);
@@ -1757,20 +1762,33 @@
       );
     }
 
+    function renderInitialNotes() {
+      notes = loadDemoNotes();
+      els.cityText.textContent = currentCity;
+      const nearbyCount = notes.filter((note) =>
+        distanceMeters(currentLocation, note.location) <= NEARBY_RADIUS_METERS
+      ).length;
+      if (!hasFirebase && nearbyCount === 0) {
+        notes = [...seedNotes(currentLocation, currentCity), ...notes];
+      }
+      renderNotes();
+    }
+
     async function revealApp() {
       const bootStart = performance.now();
 
       try {
+        // 開場只等「看得見」的資源；定位與 Firebase 改背景載入
         await Promise.all([
-          document.fonts?.ready ?? Promise.resolve(),
+          Promise.race([document.fonts?.ready ?? Promise.resolve(), delay(1500)]),
           preloadImage("paper_ball.png").catch(() => {}),
-          Promise.race([bootTileReady, delay(8000)]),
-          locateMe()
+          Promise.race([bootTileReady, delay(BOOT_TILE_TIMEOUT_MS)])
         ]);
       } catch (err) {
         console.warn("[開場] 部分資源載入失敗，仍繼續顯示", err);
       }
 
+      renderInitialNotes();
       updateThrowRemainingLabel();
       map.invalidateSize();
 
@@ -1780,6 +1798,10 @@
       }
 
       dismissSplash();
+
+      // 背景載入：不擋開場動畫
+      refreshNotes().catch((err) => console.warn("[背景] 紙條載入失敗", err));
+      locateMe().catch((err) => console.warn("[背景] 定位失敗", err));
     }
 
     markersLayer = L.layerGroup().addTo(map);
@@ -2195,7 +2217,7 @@
             showToast("無法取得定位，先用台北測試");
             await finish();
           },
-          { enableHighAccuracy: true, timeout: 8000 }
+          { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
         );
       });
     }
