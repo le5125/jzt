@@ -370,6 +370,14 @@
       align-items: end;
       pointer-events: none;
       background: linear-gradient(to top, rgba(251, 238, 212, 0.96) 30%, rgba(251, 238, 212, 0) 100%);
+      transition: opacity 0.25s ease, visibility 0.25s;
+    }
+
+    /* 寫紙條時底部三欄藏到抽屜下面，避免遮住表單 */
+    body.throw-sheet-open .bottom-bar {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
     }
 
     .bottom-tab {
@@ -567,6 +575,10 @@
       transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);
     }
     .sheet.open { transform: translateY(0); }
+
+    #throwSheet.open {
+      z-index: 900;
+    }
 
     /* 高版抽屜：用於「我的紙條」這種內容多的，撐到接近全螢幕 */
     .sheet-tall {
@@ -2349,7 +2361,10 @@
 
     function openSheet(name) {
       closeSheets();
-      if (name === "throw") els.throwSheet.classList.add("open");
+      if (name === "throw") {
+        els.throwSheet.classList.add("open");
+        document.body.classList.add("throw-sheet-open");
+      }
       if (name === "pick") els.pickSheet.classList.add("open");
       if (name === "city") els.citySheet.classList.add("open");
       if (name === "nearby") els.nearbySheet.classList.add("open");
@@ -2362,6 +2377,7 @@
       els.citySheet.classList.remove("open");
       els.nearbySheet.classList.remove("open");
       els.myNotesPage.classList.remove("open");
+      document.body.classList.remove("throw-sheet-open");
     }
 
     /*
@@ -2400,7 +2416,7 @@
         sheet.style.transform = "";
         // 拖超過 80px 就視為關閉
         if (dy > 80) {
-          sheet.classList.remove("open");
+          closeSheets();
         }
       });
     }
