@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#efe4d2" />
-  <title>丟紙條 JZT</title>
+  <meta name="theme-color" content="#fbeed4" />
+  <title>丟紙條 · 法式繪本</title>
 
-  <!-- 中文襯線字體（手寫信紙感）-->
+  <!-- 法式繪本字體：Caveat（手寫流暢）+ Patrick Hand（手寫工整）+ 思源中文 -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;500;700;900&family=Long+Cang&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;700&family=Patrick+Hand&family=Noto+Sans+TC:wght@500;700;900&display=swap" rel="stylesheet" />
 
   <!-- Leaflet -->
   <link
@@ -20,37 +20,42 @@
   />
 
   <style>
-    /* ============================================================
-       設計語言：手寫信紙 · 揉皺紙團 · 朱印章紅
-       配色：暖米紙 + 墨黑 + 印章朱紅
-       字體：Noto Serif TC（內文）+ Long Cang（裝飾手寫）
-       ============================================================ */
-    :root {
-      --paper:        #fbf3e1;   /* 主紙底色 */
-      --paper-light:  #fffaf0;   /* 抽屜/卡片底色 */
-      --paper-dark:   #e8d8b8;   /* 紙張陰影 */
-      --ink:          #2b231d;   /* 墨黑 */
-      --ink-soft:     #5a4a3a;   /* 次要文字 */
-      --muted:        #9b8a72;   /* 灰調文字 */
-      --line:         #d9c7a5;   /* 分隔線 */
-      --line-soft:    #ece0c5;
-      --seal:         #b8312c;   /* 印章朱紅（主強調色） */
-      --seal-deep:    #8a201c;   /* 深朱紅（按下/陰影） */
-      --seal-green:   #2e6d40;   /* 印章青綠（自己紙條）*/
-      --gold:         #b08642;   /* 古銅金（裝飾） */
-      --shadow-paper: 0 2px 8px rgba(75, 56, 35, 0.08), 0 14px 36px rgba(75, 56, 35, 0.14);
-      --shadow-deep:  0 8px 24px rgba(75, 56, 35, 0.18), 0 20px 48px rgba(75, 56, 35, 0.22);
+    /* ================================================================
+       設計哲學：法式繪本（Storybook illustration）
+       靈感：Sempé、Tomi Ungerer、Jean Jullien、《小王子》
+       特徵：粗墨線、手繪不對稱、暖色塊、紙巾紋理、手寫字
+       ================================================================ */
 
-      font-family: "Noto Serif TC", "Songti TC", "PingFang TC", "Microsoft JhengHei", serif;
+    :root {
+      /* 主色票：莫蘭迪 × 馬諦斯 */
+      --paper:        #fbeed4;   /* 主背景：奶黃信紙 */
+      --paper-light:  #fff8e3;   /* 卡片底：更亮的奶油 */
+      --paper-warm:   #f0d9aa;   /* 暖色塊 */
+      --ink:          #1f1812;   /* 主墨色（不是純黑，更柔和） */
+      --ink-soft:     #5a4536;
+      --muted:        #9a8870;
+
+      /* 強調色 */
+      --tomato:       #d94f3d;   /* 番茄紅（主強調色，按鈕、自己） */
+      --tomato-deep:  #a8311f;
+      --mustard:      #e6a724;   /* 芥末黃（標題、別人紙條） */
+      --olive:        #6b8e4e;   /* 橄欖綠（次要） */
+      --sky:          #6ba8c4;   /* 天空藍（裝飾） */
+      --rose:         #e8a09c;   /* 玫瑰粉（柔和強調） */
+
+      --shadow-sm: 2px 3px 0 var(--ink);
+      --shadow-md: 3px 4px 0 var(--ink);
+      --shadow-lg: 4px 6px 0 var(--ink);
+
+      font-family: "Patrick Hand", "Caveat", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
       color: var(--ink);
       background: var(--paper);
       -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
     }
 
     * { box-sizing: border-box; }
     button, textarea, input { font: inherit; color: inherit; }
-    button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    button { cursor: pointer; -webkit-tap-highlight-color: transparent; background: none; border: 0; padding: 0; }
 
     body {
       margin: 0;
@@ -58,16 +63,22 @@
       min-height: 100vh;
       overflow: hidden;
       background: var(--paper);
-      /* 紙張纖維紋理 */
+      /* 法式繪本紙巾紋理：兩層斑點 + 一層淡漸層 */
       background-image:
-        radial-gradient(circle at 20% 30%, rgba(176, 134, 66, 0.04) 0%, transparent 50%),
-        radial-gradient(circle at 80% 70%, rgba(184, 49, 44, 0.03) 0%, transparent 60%),
+        /* 紙張顆粒 */
+        radial-gradient(circle at 20% 30%, rgba(217, 79, 61, 0.05) 0%, transparent 4%),
+        radial-gradient(circle at 80% 70%, rgba(107, 142, 78, 0.04) 0%, transparent 5%),
+        radial-gradient(circle at 50% 20%, rgba(230, 167, 36, 0.04) 0%, transparent 4%),
+        /* 紙張纖維 */
         repeating-linear-gradient(
-          45deg,
-          transparent 0,
-          transparent 2px,
-          rgba(75, 56, 35, 0.008) 2px,
-          rgba(75, 56, 35, 0.008) 3px
+          37deg,
+          transparent 0 3px,
+          rgba(31, 24, 18, 0.012) 3px 4px
+        ),
+        repeating-linear-gradient(
+          120deg,
+          transparent 0 5px,
+          rgba(31, 24, 18, 0.01) 5px 6px
         );
     }
 
@@ -78,16 +89,91 @@
       overflow: hidden;
     }
 
+    /* ========== 開場動畫 ========== */
+    /* 進入時蓋一張全螢幕「信鴿叼紙條飛過」動畫
+       1.8 秒後自動淡出消失，使用者看不到資料載入的閃爍 */
+    .splash {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: var(--paper);
+      background-image:
+        radial-gradient(circle at 30% 30%, rgba(230, 167, 36, 0.15), transparent 50%),
+        radial-gradient(circle at 70% 70%, rgba(217, 79, 61, 0.1), transparent 60%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      animation: splashFade 0.5s ease-in 1.5s forwards;
+      pointer-events: none;
+    }
+    @keyframes splashFade {
+      to { opacity: 0; visibility: hidden; }
+    }
+
+    .splash-scene {
+      position: relative;
+      width: 260px;
+      height: 160px;
+    }
+
+    .splash-bird {
+      position: absolute;
+      width: 80px;
+      height: 80px;
+      top: 40px;
+      left: -90px;
+      animation: birdFly 1.5s cubic-bezier(0.3, 0, 0.5, 1) forwards;
+    }
+    @keyframes birdFly {
+      0%   { transform: translateX(0) translateY(0) rotate(-3deg); }
+      30%  { transform: translateX(80px) translateY(-8px) rotate(2deg); }
+      60%  { transform: translateX(200px) translateY(-4px) rotate(-1deg); }
+      100% { transform: translateX(360px) translateY(0) rotate(3deg); }
+    }
+
+    .splash-wing {
+      transform-origin: 35px 30px;
+      animation: wingFlap 0.25s ease-in-out infinite alternate;
+    }
+    @keyframes wingFlap {
+      from { transform: rotate(-15deg); }
+      to   { transform: rotate(35deg); }
+    }
+
+    .splash-title {
+      font-family: "Caveat", cursive;
+      font-size: 48px;
+      font-weight: 700;
+      color: var(--ink);
+      text-shadow: 3px 3px 0 var(--mustard);
+      letter-spacing: 0.05em;
+      transform: rotate(-2deg);
+      animation: splashTitle 0.6s ease-out 0.3s both;
+    }
+    @keyframes splashTitle {
+      from { opacity: 0; transform: rotate(-2deg) translateY(20px); }
+      to   { opacity: 1; transform: rotate(-2deg) translateY(0); }
+    }
+
+    .splash-subtitle {
+      font-size: 16px;
+      color: var(--ink-soft);
+      letter-spacing: 0.2em;
+      animation: splashTitle 0.6s ease-out 0.6s both;
+    }
+
     /* ========== 地圖 ========== */
     #map {
       width: 100%;
       height: 100%;
       z-index: 1;
-      /* 微微暖色濾鏡，讓 OSM 地圖貼合整體調性 */
-      filter: sepia(0.08) saturate(0.9) brightness(1.02);
+      /* 法式繪本暖色濾鏡：略飽和、偏黃 */
+      filter: sepia(0.15) saturate(0.85) brightness(1.04) contrast(1.03);
     }
 
-    /* 必要的 Leaflet 內聯樣式 */
+    /* Leaflet 必要樣式 */
     .leaflet-pane, .leaflet-tile, .leaflet-marker-icon, .leaflet-marker-shadow,
     .leaflet-tile-container, .leaflet-pane > svg, .leaflet-pane > canvas,
     .leaflet-zoom-box, .leaflet-image-layer, .leaflet-layer {
@@ -111,7 +197,7 @@
     .leaflet-left { left: 0; }
     .leaflet-control-zoom, .leaflet-control-attribution { display: none; }
 
-    /* ========== 頂部「投條」欄 ========== */
+    /* ========== 頂部「投條位置」欄 ========== */
     .top-bar {
       position: absolute;
       z-index: 500;
@@ -130,30 +216,27 @@
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 12px 18px;
-      border-radius: 999px;
+      padding: 10px 16px;
+      /* 法式繪本：粗墨線、不對稱圓角 */
+      border: 2.5px solid var(--ink);
+      border-radius: 24px 30px 26px 28px;
       background: var(--paper-light);
-      border: 1px solid var(--line);
-      box-shadow: var(--shadow-paper);
+      box-shadow: var(--shadow-md);
       color: var(--ink);
-      font-weight: 500;
-      font-size: 15px;
+      font-weight: 700;
+      font-size: 16px;
+      transform: rotate(-0.5deg);
       transition: transform 0.15s ease, box-shadow 0.15s ease;
     }
-
     .city-button:active {
-      transform: scale(0.97);
-      box-shadow: 0 2px 8px rgba(75, 56, 35, 0.12);
+      transform: rotate(-0.5deg) translate(2px, 3px);
+      box-shadow: 1px 1px 0 var(--ink);
     }
 
     .city-button::before {
-      content: "";
-      width: 18px;
-      height: 18px;
+      content: "📍";
+      font-size: 18px;
       flex-shrink: 0;
-      background: var(--seal);
-      mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'><path d='M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z'/></svg>") no-repeat center / contain;
-      -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'><path d='M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z'/></svg>") no-repeat center / contain;
     }
 
     .city-button #cityText {
@@ -166,111 +249,118 @@
     .city-button #locateText {
       flex-shrink: 0;
       font-size: 12px;
-      font-weight: 500;
-      color: var(--muted);
-      padding: 4px 10px;
+      font-weight: 700;
+      color: var(--ink);
+      padding: 3px 10px;
       border-radius: 999px;
-      background: rgba(176, 134, 66, 0.1);
-      border: 1px solid var(--line-soft);
+      background: var(--mustard);
+      border: 2px solid var(--ink);
+      transform: rotate(2deg);
     }
 
-    /* ========== 右側懸浮控制鈕（垂直三鈕）========== */
+    /* ========== 右側懸浮控制鈕 ========== */
     .side-controls {
       position: absolute;
       z-index: 500;
-      right: 14px;
-      bottom: calc(140px + env(safe-area-inset-bottom));
+      right: 16px;
+      bottom: calc(150px + env(safe-area-inset-bottom));
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 14px;
     }
 
     .side-button {
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
+      width: 52px;
+      height: 52px;
+      /* 不對稱圓角 - 像手繪的圓 */
+      border-radius: 50% 48% 52% 50%;
       background: var(--paper-light);
-      border: 1px solid var(--line);
-      box-shadow: var(--shadow-paper);
+      border: 2.5px solid var(--ink);
+      box-shadow: var(--shadow-md);
       display: flex;
       align-items: center;
       justify-content: center;
-      color: var(--ink-soft);
-      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+      color: var(--ink);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
     }
+    .side-button:nth-child(1) { transform: rotate(-3deg); }
+    .side-button:nth-child(2) { transform: rotate(2deg); }
+    .side-button:nth-child(3) { transform: rotate(-1deg); }
 
     .side-button:active {
-      transform: scale(0.92);
-      background: var(--paper-dark);
+      transform: rotate(0deg) translate(2px, 3px) !important;
+      box-shadow: 1px 1px 0 var(--ink);
     }
 
     .side-button svg {
-      width: 22px;
-      height: 22px;
+      width: 24px;
+      height: 24px;
+      stroke: var(--ink);
+      stroke-width: 2.5;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
 
-    /* 定位鈕在使用中變朱紅色 */
     .side-button.locating {
-      background: var(--seal);
-      color: white;
-      border-color: var(--seal-deep);
+      background: var(--tomato);
     }
+    .side-button.locating svg { stroke: var(--paper); }
 
-    /* ========== 底部三欄導航 ========== */
+    /* ========== 底部三欄 ========== */
     .bottom-bar {
       position: absolute;
       z-index: 500;
       left: 0;
       right: 0;
       bottom: 0;
-      padding: 12px 0 calc(8px + env(safe-area-inset-bottom));
+      padding: 16px 0 calc(12px + env(safe-area-inset-bottom));
       display: grid;
       grid-template-columns: 1fr auto 1fr;
       align-items: end;
       pointer-events: none;
-      /* 漸層讓底部更柔和 */
-      background: linear-gradient(to top, rgba(251, 243, 225, 0.96) 30%, rgba(251, 243, 225, 0) 100%);
+      background: linear-gradient(to top, rgba(251, 238, 212, 0.96) 30%, rgba(251, 238, 212, 0) 100%);
     }
 
     .bottom-tab {
       pointer-events: auto;
-      background: transparent;
-      border: 0;
-      padding: 8px 4px;
+      padding: 10px 6px;
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 4px;
-      color: var(--ink-soft);
-      font-size: 13px;
-      font-weight: 500;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 700;
       letter-spacing: 0.1em;
       justify-self: center;
-      min-width: 64px;
+      min-width: 70px;
     }
 
     .bottom-tab svg {
-      width: 24px;
-      height: 24px;
+      width: 28px;
+      height: 28px;
+      stroke: var(--ink);
+      stroke-width: 2.5;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
 
-    .bottom-tab.left { justify-self: start; padding-left: 24px; }
-    .bottom-tab.right { justify-self: end; padding-right: 24px; }
+    .bottom-tab.left { justify-self: start; padding-left: 28px; }
+    .bottom-tab.right { justify-self: end; padding-right: 28px; }
+    .bottom-tab.active { color: var(--tomato); }
+    .bottom-tab:active { transform: translateY(2px); }
 
-    .bottom-tab.active { color: var(--seal); }
-
-    /* ★ 中央大紙團按鈕 ★ */
+    /* ★ 中央大紙團「扔」按鈕 ★ */
     .throw-paper-ball {
       pointer-events: auto;
-      background: none;
-      border: 0;
-      padding: 0;
-      width: 112px;
-      height: 112px;
+      width: 120px;
+      height: 120px;
       position: relative;
-      transform: translateY(-12px);  /* 浮出底欄 */
+      transform: translateY(-16px);
       cursor: pointer;
-      filter: drop-shadow(0 8px 16px rgba(75, 56, 35, 0.28));
+      filter: drop-shadow(3px 5px 0 var(--ink));
       animation: paperFloat 4s ease-in-out infinite;
       transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
     }
@@ -285,123 +375,115 @@
     }
 
     .throw-paper-ball:active {
-      transform: translateY(-8px) scale(0.92);
+      transform: translateY(-12px) scale(0.92);
       animation: none;
     }
 
     @keyframes paperFloat {
-      0%, 100% { transform: translateY(-12px) rotate(-2deg); }
-      50%      { transform: translateY(-16px) rotate(2deg); }
+      0%, 100% { transform: translateY(-16px) rotate(-3deg); }
+      50%      { transform: translateY(-22px) rotate(3deg); }
     }
 
-    /* ========== Marker 樣式 ========== */
-    /* 別人的紙條 (📃)：朱印章紅邊框 */
+    /* ========== Marker（地圖上的紙條圖示） ========== */
+    /* 別人的紙條：芥末黃 + 粗墨線 */
     .paper-marker {
-      width: 36px;
-      height: 36px;
+      width: 38px;
+      height: 38px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 22px;
+      font-size: 20px;
       line-height: 1;
-      background:
-        radial-gradient(circle at 30% 30%, #fffaee 0%, #f4e4be 60%, #d9bf85 100%);
-      border: 2px solid var(--seal);
-      border-radius: 8px 10px 7px 9px;
-      box-shadow:
-        inset -2px -3px 6px rgba(184, 49, 44, 0.15),
-        inset 2px 2px 4px rgba(255, 255, 255, 0.7),
-        0 6px 14px rgba(184, 49, 44, 0.32);
+      background: var(--mustard);
+      border: 2.5px solid var(--ink);
+      /* 手繪不對稱圓角 */
+      border-radius: 8px 12px 7px 10px;
+      box-shadow: 2px 3px 0 var(--ink);
       transform: rotate(-6deg);
       position: relative;
       cursor: pointer;
       transition: transform 0.2s ease;
     }
 
-    .paper-marker:hover { transform: rotate(-6deg) scale(1.1); }
+    .paper-marker:hover { transform: rotate(-6deg) scale(1.15); }
 
-    /* 自己的紙條 (📜)：青綠邊框（印章綠）*/
+    /* 自己的紙條：番茄紅 */
     .paper-marker.mine {
-      background:
-        radial-gradient(circle at 30% 30%, #f0fbf2 0%, #cee9d3 60%, #88b894 100%);
-      border-color: var(--seal-green);
-      box-shadow:
-        inset -2px -3px 6px rgba(46, 109, 64, 0.18),
-        inset 2px 2px 4px rgba(255, 255, 255, 0.7),
-        0 6px 14px rgba(46, 109, 64, 0.4);
+      background: var(--tomato);
+      color: var(--paper);
     }
 
-    /* 圖片紙條：顯示縮圖 */
+    /* 圖片紙條 */
     .paper-marker.image-marker {
-      width: 44px;
-      height: 44px;
+      width: 46px;
+      height: 46px;
       padding: 3px;
-      background: #fffaee;
-      border-radius: 8px;
+      background: var(--paper-light);
+      border-radius: 6px 10px 7px 9px;
       transform: rotate(-4deg);
+    }
+    .paper-marker.image-marker.mine {
+      background: var(--tomato);
     }
     .paper-marker.image-marker img {
       width: 100%;
       height: 100%;
       object-fit: cover;
-      border-radius: 5px;
+      border-radius: 3px;
       pointer-events: none;
       user-select: none;
     }
 
-    /* 朱印標記（右上角小點）*/
+    /* 右上角小圓點（像郵戳） */
     .paper-marker::before {
       content: "";
       position: absolute;
-      top: -3px;
-      right: -3px;
-      width: 10px;
-      height: 10px;
-      background: var(--seal);
+      top: -5px;
+      right: -5px;
+      width: 12px;
+      height: 12px;
+      background: var(--tomato);
+      border: 2px solid var(--ink);
       border-radius: 50%;
-      border: 1.5px solid white;
-      box-shadow: 0 1px 3px rgba(184, 49, 44, 0.5);
     }
     .paper-marker.mine::before {
-      background: var(--seal-green);
-      box-shadow: 0 1px 3px rgba(46, 109, 64, 0.5);
+      background: var(--olive);
     }
 
+    /* 使用者位置標記（藍點） */
     .user-marker {
-      width: 18px;
-      height: 18px;
-      border: 3px solid white;
+      width: 22px;
+      height: 22px;
+      background: var(--sky);
+      border: 3px solid var(--ink);
       border-radius: 50%;
-      background: var(--seal);
-      box-shadow:
-        0 0 0 4px rgba(184, 49, 44, 0.2),
-        0 0 0 12px rgba(184, 49, 44, 0.08),
-        0 4px 10px rgba(184, 49, 44, 0.4);
+      box-shadow: 0 0 0 6px rgba(107, 168, 196, 0.25), 2px 3px 0 var(--ink);
       animation: pulse 2s ease-in-out infinite;
     }
 
     @keyframes pulse {
-      0%, 100% { box-shadow: 0 0 0 4px rgba(184, 49, 44, 0.2), 0 0 0 12px rgba(184, 49, 44, 0.08), 0 4px 10px rgba(184, 49, 44, 0.4); }
-      50%      { box-shadow: 0 0 0 6px rgba(184, 49, 44, 0.25), 0 0 0 18px rgba(184, 49, 44, 0.05), 0 4px 10px rgba(184, 49, 44, 0.4); }
+      0%, 100% { box-shadow: 0 0 0 6px rgba(107, 168, 196, 0.25), 2px 3px 0 var(--ink); }
+      50%      { box-shadow: 0 0 0 12px rgba(107, 168, 196, 0.1), 2px 3px 0 var(--ink); }
     }
 
     /* ========== 底部抽屜 ========== */
     .sheet {
       position: absolute;
       z-index: 800;
-      left: 0;
-      right: 0;
+      left: 8px;
+      right: 8px;
       bottom: 0;
-      max-height: min(76vh, 600px);
+      max-height: min(80vh, 620px);
       padding: 22px 22px calc(28px + env(safe-area-inset-bottom));
-      border-radius: 24px 24px 0 0;
+      /* 不對稱圓角 + 粗墨線 */
+      border-radius: 24px 28px 0 0;
       background: var(--paper-light);
-      box-shadow: var(--shadow-deep);
+      border: 2.5px solid var(--ink);
+      border-bottom: 0;
+      box-shadow: 0 -4px 0 var(--ink);
       overflow: auto;
-      transform: translateY(105%);
-      transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
-      /* 抽屜頂端裝飾條 */
-      border-top: 1px solid var(--line);
+      transform: translateY(110%);
+      transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);
     }
     .sheet.open { transform: translateY(0); }
 
@@ -409,11 +491,11 @@
     .sheet::before {
       content: "";
       display: block;
-      width: 40px;
-      height: 4px;
-      border-radius: 2px;
-      background: var(--line);
-      margin: -8px auto 14px;
+      width: 48px;
+      height: 5px;
+      border-radius: 3px;
+      background: var(--ink);
+      margin: -10px auto 16px;
     }
 
     .sheet-header {
@@ -426,132 +508,151 @@
 
     .sheet-header h2 {
       margin: 0;
-      font-size: 22px;
+      font-family: "Caveat", cursive;
+      font-size: 32px;
       font-weight: 700;
-      letter-spacing: 0.05em;
       color: var(--ink);
-      /* 朱印章下劃線 */
+      letter-spacing: 0.02em;
+      transform: rotate(-1deg);
       position: relative;
-      padding-left: 14px;
     }
-    .sheet-header h2::before {
+    /* 標題下面的手繪曲線 */
+    .sheet-header h2::after {
       content: "";
       position: absolute;
-      left: 0;
-      top: 50%;
-      transform: translateY(-50%);
-      width: 4px;
-      height: 22px;
-      background: var(--seal);
-      border-radius: 2px;
+      left: -4px;
+      right: -4px;
+      bottom: -6px;
+      height: 6px;
+      background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 6' preserveAspectRatio='none'><path d='M2,3 Q25,0 50,3 T98,3' stroke='%23d94f3d' stroke-width='2.5' fill='none' stroke-linecap='round'/></svg>") no-repeat center / 100% 100%;
     }
 
     .close-button {
-      width: 36px;
-      height: 36px;
-      border: 0;
-      border-radius: 50%;
-      background: var(--paper-dark);
-      color: var(--ink-soft);
-      font-size: 24px;
+      width: 40px;
+      height: 40px;
+      border: 2.5px solid var(--ink);
+      border-radius: 50% 48% 52% 50%;
+      background: var(--paper);
+      color: var(--ink);
+      font-size: 22px;
+      font-weight: 700;
       line-height: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: background 0.15s ease;
+      box-shadow: 2px 3px 0 var(--ink);
+      transform: rotate(3deg);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
     }
-    .close-button:active { background: var(--line); }
+    .close-button:active {
+      transform: rotate(3deg) translate(2px, 3px);
+      box-shadow: 0 0 0 var(--ink);
+    }
 
     /* ========== 表單元素 ========== */
-    textarea, input {
+    textarea, input[type="text"], input:not([type]), input[type="search"] {
       width: 100%;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 14px 14px;
-      background: #fffefa;
+      border: 2.5px solid var(--ink);
+      border-radius: 12px 14px 11px 13px;
+      padding: 14px;
+      background: var(--paper);
       color: var(--ink);
       outline: none;
-      font-size: 15px;
+      font-size: 16px;
       line-height: 1.7;
+      font-family: "Patrick Hand", "Caveat", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
       resize: vertical;
+      box-shadow: var(--shadow-sm);
       /* 信紙橫線 */
       background-image: repeating-linear-gradient(
         to bottom,
         transparent 0,
-        transparent 28px,
-        rgba(217, 199, 165, 0.35) 28px,
-        rgba(217, 199, 165, 0.35) 29px
+        transparent 30px,
+        rgba(31, 24, 18, 0.12) 30px,
+        rgba(31, 24, 18, 0.12) 31px
       );
-      background-position: 0 12px;
-      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      background-position: 0 14px;
+      transition: box-shadow 0.15s ease, transform 0.1s ease;
     }
-    input { background-image: none; padding: 12px 14px; }
-
+    input[type="text"], input:not([type]), input[type="search"] {
+      background-image: none;
+      padding: 12px 14px;
+    }
     textarea:focus, input:focus {
-      border-color: var(--seal);
-      box-shadow: 0 0 0 3px rgba(184, 49, 44, 0.1);
+      box-shadow: 3px 5px 0 var(--tomato);
+    }
+
+    input[type="file"] {
+      width: 100%;
+      border: 2.5px dashed var(--ink);
+      border-radius: 12px;
+      padding: 10px 14px;
+      background: var(--paper);
+      font-family: inherit;
+      color: var(--ink-soft);
     }
 
     .throw-form, .picked-note, .reply-form {
       display: grid;
       gap: 16px;
-      margin-top: 16px;
+      margin-top: 18px;
     }
 
     .city-search {
       display: grid;
       grid-template-columns: 1fr auto;
       gap: 10px;
-      margin-top: 16px;
+      margin-top: 18px;
     }
 
-    /* ========== 按鈕 ========== */
+    /* ========== 按鈕（法式繪本三色：番茄、芥末、奶油） ========== */
     .primary-button, .secondary-button, .danger-button {
-      min-height: 44px;
-      border: 0;
-      border-radius: 10px;
-      padding: 0 20px;
+      min-height: 48px;
+      border: 2.5px solid var(--ink);
+      border-radius: 12px 16px 13px 14px;
+      padding: 0 22px;
       font-weight: 700;
-      font-size: 15px;
+      font-size: 16px;
       letter-spacing: 0.05em;
-      transition: transform 0.12s ease, box-shadow 0.15s ease, background 0.15s ease;
+      box-shadow: var(--shadow-md);
+      transition: transform 0.12s ease, box-shadow 0.15s ease;
+      font-family: inherit;
     }
 
     .primary-button {
-      background: var(--seal);
-      color: white;
-      box-shadow: 0 4px 12px rgba(184, 49, 44, 0.32);
+      background: var(--tomato);
+      color: var(--paper);
     }
     .primary-button:active {
-      background: var(--seal-deep);
-      transform: scale(0.97);
-      box-shadow: 0 2px 6px rgba(184, 49, 44, 0.3);
+      transform: translate(2px, 3px);
+      box-shadow: 1px 1px 0 var(--ink);
     }
     .primary-button:disabled {
-      background: var(--paper-dark);
+      background: var(--paper-warm);
       color: var(--muted);
-      box-shadow: none;
       cursor: not-allowed;
+    }
+    .primary-button:disabled:active {
+      transform: none;
+      box-shadow: var(--shadow-md);
     }
 
     .secondary-button {
-      background: var(--paper-dark);
+      background: var(--mustard);
       color: var(--ink);
     }
     .secondary-button:active {
-      background: var(--line);
-      transform: scale(0.97);
+      transform: translate(2px, 3px);
+      box-shadow: 1px 1px 0 var(--ink);
     }
 
     .danger-button {
       background: var(--ink);
       color: var(--paper);
-      min-height: 40px;
-      padding: 0 16px;
+      min-height: 42px;
+      padding: 0 18px;
+      box-shadow: 2px 3px 0 var(--tomato);
     }
     .danger-button:active {
-      background: #000;
-      transform: scale(0.97);
+      transform: translate(2px, 3px);
+      box-shadow: 0 0 0 var(--tomato);
     }
 
     .sheet-row {
@@ -561,42 +662,42 @@
       gap: 12px;
     }
 
-    /* ========== 撿到紙條 ========== */
+    /* ========== 撿到紙條 - 主體 ========== */
     .note-content {
       margin: 0;
-      padding: 22px;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background:
-        repeating-linear-gradient(to bottom, transparent 0, transparent 28px, rgba(217, 199, 165, 0.3) 28px, rgba(217, 199, 165, 0.3) 29px),
-        linear-gradient(135deg, #fffefa 0%, #fff8e8 100%);
-      line-height: 1.9;
+      padding: 24px;
+      border: 2.5px solid var(--ink);
+      border-radius: 4px 12px 6px 10px;
+      background: var(--paper-light);
+      line-height: 2.0;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
-      font-size: 16px;
+      font-size: 18px;
       color: var(--ink);
-      box-shadow: inset 0 1px 3px rgba(75, 56, 35, 0.04);
+      font-family: "Caveat", "Patrick Hand", "Noto Sans TC", serif;
+      box-shadow: var(--shadow-md);
       position: relative;
+      /* 信紙橫線 */
+      background-image: repeating-linear-gradient(
+        to bottom,
+        transparent 0,
+        transparent 30px,
+        rgba(31, 24, 18, 0.1) 30px,
+        rgba(31, 24, 18, 0.1) 31px
+      );
+      background-position: 0 18px;
+      transform: rotate(-0.5deg);
     }
-    /* 朱印章標記 */
-    .note-content::before {
-      content: "私";
+    /* 右下角小郵戳 */
+    .note-content::after {
+      content: "";
       position: absolute;
-      bottom: 14px;
-      right: 14px;
-      width: 32px;
-      height: 32px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: var(--seal);
-      color: white;
-      font-weight: 900;
-      font-size: 14px;
-      border-radius: 4px;
-      opacity: 0.75;
-      transform: rotate(-8deg);
-      box-shadow: 0 2px 4px rgba(184, 49, 44, 0.3);
+      bottom: 10px;
+      right: 12px;
+      width: 38px;
+      height: 38px;
+      background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><circle cx='20' cy='20' r='15' fill='none' stroke='%23d94f3d' stroke-width='2' stroke-dasharray='3 2'/><text x='20' y='25' font-size='14' font-family='serif' font-weight='bold' fill='%23d94f3d' text-anchor='middle'>私</text></svg>") no-repeat center / contain;
+      transform: rotate(-12deg);
     }
 
     .note-meta {
@@ -604,19 +705,21 @@
       grid-template-columns: repeat(3, 1fr);
       gap: 10px;
       margin: 0;
-      padding: 12px 0;
-      border-top: 1px dashed var(--line);
-      border-bottom: 1px dashed var(--line);
+      padding: 14px 6px;
+      border-top: 2.5px dashed var(--ink);
+      border-bottom: 2.5px dashed var(--ink);
     }
     .note-meta dt {
       color: var(--muted);
       font-size: 12px;
-      letter-spacing: 0.1em;
+      letter-spacing: 0.15em;
+      font-weight: 700;
     }
     .note-meta dd {
       margin: 6px 0 0;
       color: var(--ink);
-      font-weight: 500;
+      font-weight: 700;
+      font-size: 15px;
       overflow-wrap: anywhere;
     }
 
@@ -626,9 +729,11 @@
     }
     .reply-panel h3 {
       margin: 4px 0 0;
-      font-size: 16px;
-      color: var(--ink-soft);
-      letter-spacing: 0.1em;
+      font-family: "Caveat", cursive;
+      font-size: 22px;
+      color: var(--ink);
+      letter-spacing: 0.05em;
+      transform: rotate(-1deg);
     }
 
     .reply-list {
@@ -641,70 +746,73 @@
     .reply-card {
       display: grid;
       gap: 6px;
-      padding: 12px 14px;
-      border-radius: 10px;
-      background: #fffefa;
-      border: 1px solid var(--line-soft);
-      border-left: 3px solid var(--gold);
+      padding: 14px;
+      border: 2.5px solid var(--ink);
+      border-radius: 10px 14px 11px 12px;
+      background: var(--paper);
+      box-shadow: 2px 3px 0 var(--ink);
+      transform: rotate(-0.3deg);
     }
+    .reply-card:nth-child(2n) { transform: rotate(0.4deg); }
     .reply-card p {
       margin: 0;
       line-height: 1.6;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
-      font-size: 14px;
+      font-size: 15px;
     }
-    .reply-card audio { width: 100%; }
     .reply-card small {
       color: var(--muted);
-      font-size: 11px;
-      letter-spacing: 0.05em;
+      font-size: 12px;
+      letter-spacing: 0.08em;
     }
 
     .sticker-row {
       display: grid;
       grid-template-columns: repeat(5, 1fr);
-      gap: 8px;
+      gap: 10px;
     }
     .sticker-button {
       aspect-ratio: 1;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: #fffefa;
-      font-size: 24px;
-      transition: transform 0.12s ease, background 0.15s ease;
+      border: 2.5px solid var(--ink);
+      border-radius: 50% 48% 52% 50%;
+      background: var(--paper);
+      font-size: 26px;
+      box-shadow: 2px 3px 0 var(--ink);
+      transition: transform 0.12s ease, box-shadow 0.15s ease;
     }
+    .sticker-button:nth-child(odd) { transform: rotate(-3deg); }
+    .sticker-button:nth-child(even) { transform: rotate(3deg); }
     .sticker-button:active {
-      transform: scale(0.88);
-      background: var(--paper-dark);
+      transform: translate(2px, 3px) rotate(0) !important;
+      box-shadow: 0 0 0 var(--ink);
     }
 
     /* 撿紙條底部動作列 */
     .pick-actions {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 10px;
       padding-top: 14px;
       margin-top: 14px;
-      border-top: 1px dashed var(--line);
+      border-top: 2.5px dashed var(--ink);
     }
     .text-button {
-      background: none;
-      border: 0;
       padding: 8px;
       color: var(--muted);
-      font-size: 13px;
+      font-size: 14px;
       letter-spacing: 0.05em;
       text-decoration: underline;
-      text-decoration-color: var(--line);
+      text-decoration-color: var(--muted);
+      text-decoration-style: wavy;
       text-underline-offset: 4px;
       align-self: center;
     }
-    .text-button:active { color: var(--seal); }
+    .text-button:active { color: var(--tomato); }
 
     .muted {
       color: var(--muted);
-      font-size: 13px;
+      font-size: 14px;
     }
 
     /* ========== 圖片預覽 ========== */
@@ -712,35 +820,37 @@
       display: grid;
       gap: 10px;
     }
-    input[type="file"] {
-      padding: 10px 14px;
-      background: var(--paper);
-      border-style: dashed;
-    }
     .image-preview, .picked-image {
       width: 100%;
-      max-height: 260px;
+      max-height: 280px;
       object-fit: cover;
-      border-radius: 10px;
-      border: 1px solid var(--line);
-      background: #fffefa;
+      border: 2.5px solid var(--ink);
+      border-radius: 6px 12px 7px 11px;
+      background: var(--paper);
+      box-shadow: var(--shadow-md);
+      transform: rotate(-1deg);
     }
 
     /* ========== 城市搜尋結果 ========== */
     .result-row {
       width: 100%;
       min-height: 48px;
-      margin-top: 8px;
-      border: 1px solid var(--line-soft);
-      border-radius: 10px;
-      background: #fffefa;
+      margin-top: 10px;
+      border: 2.5px solid var(--ink);
+      border-radius: 10px 14px 11px 12px;
+      background: var(--paper);
       padding: 12px 14px;
       text-align: left;
       color: var(--ink);
-      font-size: 14px;
-      transition: background 0.15s ease;
+      font-size: 15px;
+      font-family: inherit;
+      box-shadow: 2px 3px 0 var(--ink);
+      transition: transform 0.12s ease, box-shadow 0.15s ease;
     }
-    .result-row:active { background: var(--paper-dark); }
+    .result-row:active {
+      transform: translate(2px, 3px);
+      box-shadow: 0 0 0 var(--ink);
+    }
 
     /* ========== 我的紙條頁 ========== */
     .page {
@@ -762,30 +872,46 @@
     }
     .page-header h1 {
       margin: 0;
-      font-size: 24px;
+      font-family: "Caveat", cursive;
+      font-size: 38px;
       font-weight: 700;
-      letter-spacing: 0.08em;
       color: var(--ink);
+      letter-spacing: 0.02em;
+      transform: rotate(-1deg);
+      position: relative;
+    }
+    .page-header h1::after {
+      content: "";
+      position: absolute;
+      left: -4px;
+      right: -4px;
+      bottom: -8px;
+      height: 8px;
+      background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 8' preserveAspectRatio='none'><path d='M2,4 Q25,0 50,4 T98,4' stroke='%23e6a724' stroke-width='3' fill='none' stroke-linecap='round'/></svg>") no-repeat center / 100% 100%;
     }
 
     .note-list {
       display: grid;
-      gap: 14px;
-      margin-top: 20px;
+      gap: 16px;
+      margin-top: 24px;
     }
 
     .note-card {
       padding: 18px;
-      border-radius: 14px;
+      border: 2.5px solid var(--ink);
+      border-radius: 8px 14px 9px 12px;
       background: var(--paper-light);
-      box-shadow: var(--shadow-paper);
-      border: 1px solid var(--line-soft);
+      box-shadow: var(--shadow-md);
+      transform: rotate(-0.5deg);
     }
+    .note-card:nth-child(2n) { transform: rotate(0.6deg); }
+    .note-card:nth-child(3n) { transform: rotate(-0.3deg); }
     .note-card p {
       margin: 0 0 10px;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
       line-height: 1.7;
+      font-size: 16px;
     }
     .note-card-actions {
       display: flex;
@@ -799,25 +925,26 @@
       position: absolute;
       z-index: 500;
       left: 50%;
-      bottom: 156px;
-      transform: translateX(-50%);
-      border-radius: 999px;
-      padding: 12px 20px;
-      color: white;
-      background: var(--seal);
-      box-shadow: 0 8px 24px rgba(184, 49, 44, 0.4);
+      bottom: 168px;
+      transform: translateX(-50%) rotate(-2deg);
+      border: 2.5px solid var(--ink);
+      border-radius: 24px 30px 26px 28px;
+      padding: 12px 22px;
+      color: var(--paper);
+      background: var(--tomato);
+      box-shadow: var(--shadow-md);
       display: none;
       font-weight: 700;
       letter-spacing: 0.05em;
-      font-size: 14px;
-      border: 0;
+      font-size: 15px;
+      font-family: inherit;
       animation: alertBounce 1.4s ease-in-out infinite;
     }
     .alert.show { display: block; }
 
     @keyframes alertBounce {
-      0%, 100% { transform: translateX(-50%) translateY(0); }
-      50%      { transform: translateX(-50%) translateY(-4px); }
+      0%, 100% { transform: translateX(-50%) translateY(0) rotate(-2deg); }
+      50%      { transform: translateX(-50%) translateY(-6px) rotate(-2deg); }
     }
 
     /* ========== Toast ========== */
@@ -827,16 +954,17 @@
       left: 50%;
       top: max(80px, calc(env(safe-area-inset-top) + 70px));
       max-width: min(520px, calc(100% - 28px));
-      transform: translateX(-50%);
-      border-radius: 999px;
-      padding: 12px 20px;
+      transform: translateX(-50%) rotate(-1deg);
+      border: 2.5px solid var(--ink);
+      border-radius: 16px 20px 17px 19px;
+      padding: 12px 22px;
       color: var(--paper);
       background: var(--ink);
-      box-shadow: 0 10px 28px rgba(43, 35, 28, 0.3);
+      box-shadow: 3px 4px 0 var(--mustard);
       display: none;
-      font-size: 14px;
-      font-weight: 500;
-      letter-spacing: 0.05em;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
       text-align: center;
     }
     .toast.show {
@@ -845,23 +973,53 @@
     }
 
     @keyframes toastIn {
-      from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
-      to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+      from { opacity: 0; transform: translateX(-50%) translateY(-12px) rotate(-1deg); }
+      to   { opacity: 1; transform: translateX(-50%) translateY(0) rotate(-1deg); }
     }
 
     @media (max-width: 380px) {
       .note-meta { grid-template-columns: 1fr 1fr; }
-      .bottom-tab.left { padding-left: 16px; }
-      .bottom-tab.right { padding-right: 16px; }
-      .throw-paper-ball { width: 100px; height: 100px; }
+      .bottom-tab.left { padding-left: 18px; }
+      .bottom-tab.right { padding-right: 18px; }
+      .throw-paper-ball { width: 104px; height: 104px; }
     }
-
-    /* ========== 大圖標 SVG inline ========== */
-    .icon { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   </style>
 </head>
 
 <body>
+  <!-- ============= 開場動畫（1.5 秒後自動淡出） ============= -->
+  <div class="splash" aria-hidden="true">
+    <div class="splash-scene" aria-hidden="true">
+      <!-- 信鴿叼著紙條飛過 -->
+      <svg class="splash-bird" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+        <!-- 身體 -->
+        <ellipse cx="40" cy="42" rx="22" ry="14" fill="#fbeed4" stroke="#1f1812" stroke-width="2.5"/>
+        <!-- 頭 -->
+        <circle cx="58" cy="32" r="11" fill="#fbeed4" stroke="#1f1812" stroke-width="2.5"/>
+        <!-- 嘴 -->
+        <path d="M68,32 L76,30 L70,36 Z" fill="#e6a724" stroke="#1f1812" stroke-width="2"/>
+        <!-- 眼 -->
+        <circle cx="60" cy="29" r="1.6" fill="#1f1812"/>
+        <!-- 翅膀（會動的） -->
+        <g class="splash-wing">
+          <path d="M35,32 Q30,16 18,18 Q14,25 22,38 Q30,42 35,38 Z"
+                fill="#e6a724" stroke="#1f1812" stroke-width="2.5" stroke-linejoin="round"/>
+        </g>
+        <!-- 腳 -->
+        <line x1="38" y1="54" x2="36" y2="62" stroke="#1f1812" stroke-width="2" stroke-linecap="round"/>
+        <line x1="44" y1="54" x2="42" y2="62" stroke="#1f1812" stroke-width="2" stroke-linecap="round"/>
+        <!-- 嘴上叼的紙條 -->
+        <g transform="translate(72,30) rotate(-15)">
+          <rect x="0" y="0" width="14" height="10" fill="#fff8e3" stroke="#1f1812" stroke-width="2" rx="1"/>
+          <line x1="3" y1="3.5" x2="11" y2="3.5" stroke="#1f1812" stroke-width="1" opacity="0.5"/>
+          <line x1="3" y1="6.5" x2="9" y2="6.5" stroke="#1f1812" stroke-width="1" opacity="0.5"/>
+        </g>
+      </svg>
+    </div>
+    <h1 class="splash-title">丟紙條</h1>
+    <p class="splash-subtitle">在地圖上輕輕放下一句話</p>
+  </div>
+
   <main id="app">
     <div id="map"></div>
 
@@ -1073,7 +1231,7 @@
       格式像：1234567890-AbCdEfGh
       留空白 = 直接用網頁版（在 LINE 外面打開也能正常運作）
     */
-    const LIFF_ID = "2010143431-l2kcIl8v";
+    const LIFF_ID = "";
 
     const hasFirebase = Boolean(
       firebaseConfig.apiKey &&
@@ -1198,9 +1356,10 @@
     };
 
     const map = L.map("map", { zoomControl: false }).setView([taipei.lat, taipei.lng], 15);
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    // 台灣社群維護的 OSM 中文版圖資，街道名稱全中文化、台灣街區更精細
+    L.tileLayer("https://tile.openstreetmap.tw/tiles/{z}/{x}/{y}.png", {
       maxZoom: 19,
-      attribution: "&copy; OpenStreetMap"
+      attribution: "&copy; OpenStreetMap Taiwan"
     }).addTo(map);
 
     markersLayer = L.layerGroup().addTo(map);
