@@ -1595,6 +1595,7 @@
     const NEARBY_RADIUS_METERS = 1000;  // 僅用於「附近提示」與一鍵撿最近的紙條
     let markersLayer = null;
     let userMarker = null;
+    let pickedAuthorUids = new Set();
 
     const els = {
       cityButton: document.querySelector("#cityButton"),
@@ -1818,6 +1819,7 @@
         console.log(`[開場] 關閉載入畫面 (${reason})`);
 
         try {
+          await loadPickedAuthors();
           renderInitialNotes();
           updateThrowRemainingLabel();
           map.invalidateSize();
@@ -2387,7 +2389,7 @@
         note.pickedCount += 1;
         await updatePickedCount(note);
         saveDemoNotes();
-        markAuthorAsPicked(note.authorUid);
+        await markAuthorAsPicked(note.authorUid);
       }
 
       renderPickedNote(note);
@@ -2959,24 +2961,60 @@
 
     /*
       ============= 撿紙條計次 =============
-      同一位作者只算一次：你已經撿過這個人的紙條，再撿他的其他張或同一張都不再加次數
+      同一位作者只算一次；有 Firebase 時用 line_xxx 同步到雲端，換手機也記得
     */
-    function getPickedAuthorUids() {
+    function pickedAuthorsStorageKey() {
+      return `jzt_picked_authors_${currentUserId}`;
+    }
+
+    function savePickedAuthorsLocal() {
+      localStorage.setItem(
+        pickedAuthorsStorageKey(),
+        JSON.stringify([...pickedAuthorUids])
+      );
+    }
+
+    async function loadPickedAuthors() {
+      pickedAuthorUids = new Set();
       try {
-        return new Set(JSON.parse(localStorage.getItem("jzt_picked_authors") || "[]"));
-      } catch {
-        return new Set();
+        JSON.parse(localStorage.getItem(pickedAuthorsStorageKey()) || "[]")
+          .forEach((uid) => pickedAuthorUids.add(uid));
+      } catch {}
+
+      if (!hasFirebase) return;
+
+      try {
+        const { doc, getDoc } = firebaseApi.firestoreModule;
+        const snap = await getDoc(doc(db, "users", currentUserId));
+        if (snap.exists()) {
+          (snap.data().pickedAuthorUids || []).forEach((uid) => pickedAuthorUids.add(uid));
+        }
+        savePickedAuthorsLocal();
+      } catch (err) {
+        console.warn("[撿記錄] Firebase 讀取失敗，使用本機", err);
       }
     }
 
     function hasPickedAuthorBefore(authorUid) {
-      return getPickedAuthorUids().has(authorUid);
+      return pickedAuthorUids.has(authorUid);
     }
 
-    function markAuthorAsPicked(authorUid) {
-      const set = getPickedAuthorUids();
-      set.add(authorUid);
-      localStorage.setItem("jzt_picked_authors", JSON.stringify([...set]));
+    async function markAuthorAsPicked(authorUid) {
+      pickedAuthorUids.add(authorUid);
+      savePickedAuthorsLocal();
+
+      if (!hasFirebase || authorUid === "seed") return;
+
+      try {
+        const { doc, setDoc, arrayUnion } = firebaseApi.firestoreModule;
+        await setDoc(
+          doc(db, "users", currentUserId),
+          { pickedAuthorUids: arrayUnion(authorUid) },
+          { merge: true }
+        );
+      } catch (err) {
+        console.warn("[撿記錄] Firebase 寫入失敗", err);
+      }
     }
 
     /*
