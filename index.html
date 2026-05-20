@@ -1674,7 +1674,8 @@
 
     let myNotesRequestId = 0;
     let replyingInProgress = false;
-    let notesRefreshPromise = null;
+    let notesUnsubscribe = null;
+    let notesListenerToken = 0;
 
     function getRegisteredAuthorUids() {
       try {
@@ -2056,55 +2057,112 @@
         .replace(/'/g, "&#039;");
     }
 
-    function cloneNotes(list) {
-      return list.map((note) => ({ ...note }));
+    function mapFirestoreDoc(doc) {
+      const data = doc.data();
+      if (!data) return null;
+      const imageUrls = Array.isArray(data.imageUrls) && data.imageUrls.length
+        ? data.imageUrls.filter(Boolean).slice(0, MAX_IMAGES_PER_NOTE)
+        : (data.imageUrl ? [data.imageUrl] : []);
+      const createdAt = data.createdAt?.toDate?.().toISOString() || new Date().toISOString();
+      const lastActivityAt = data.lastActivityAt?.toDate?.().toISOString()
+        || data.lastDriftAt?.toDate?.().toISOString()
+        || createdAt;
+      const loc = data.location;
+      const lat = loc?.latitude ?? loc?.lat;
+      const lng = loc?.longitude ?? loc?.lng;
+      return normalizeNote({
+        id: doc.id,
+        authorUid: data.authorUid,
+        type: data.type,
+        content: data.content,
+        imageUrl: imageUrls[0] || "",
+        imageUrls,
+        location: { lat, lng },
+        city: data.city,
+        createdAt,
+        lastActivityAt,
+        expiresAt: data.expiresAt?.toDate?.().toISOString() || addDays(new Date(), 30).toISOString(),
+        pickedCount: data.pickedCount || 0,
+        replyCount: data.replyCount || 0,
+        reportCount: data.reportCount || 0,
+        isSeed: Boolean(data.isSeed)
+      });
     }
 
-    function getNotesSnapshot() {
-      if (notes.length) return cloneNotes(notes);
-      const cached = loadNotesCache();
-      return cached ? cloneNotes(cached) : [];
+    /** Firebase 為唯一真相來源：收到資料就直接更新地圖 */
+    function setNotesFromFirestoreDocs(docs) {
+      const all = docs.map(mapFirestoreDoc).filter(Boolean);
+      notes = sortNotesByActivity(
+        all.filter((item) => (item.reportCount || 0) < 3 || isMyNote(item))
+      );
+      if (notes.length) saveNotesCache();
+      renderNotes();
+      updateReplyAlert();
     }
 
-    function mergeNotesById(primary, secondary) {
-      const map = new Map();
-      normalizeNotes(secondary).forEach((note) => map.set(note.id, note));
-      normalizeNotes(primary).forEach((note) => map.set(note.id, note));
-      return sortNotesByActivity([...map.values()]);
+    function stopNotesListener() {
+      notesListenerToken++;
+      if (notesUnsubscribe) {
+        notesUnsubscribe();
+        notesUnsubscribe = null;
+      }
     }
 
-    /** Firebase 有資料就合併更新；沒有就保留現有／快取，絕不無故清空 */
-    function applyNotesOrKeep(freshNotes, fallbackNotes) {
-      const safeFresh = normalizeNotes(freshNotes);
-      const safeFallback = normalizeNotes(fallbackNotes);
+    async function startNotesListener() {
+      if (!hasFirebase || !db) return;
+      stopNotesListener();
+      const token = notesListenerToken;
 
-      if (safeFresh.length > 0) {
-        notes = safeFallback.length
-          ? mergeNotesById(safeFresh, safeFallback)
-          : sortNotesByActivity(safeFresh);
-        saveNotesCache();
-        return true;
+      await ensureAuth();
+      if (token !== notesListenerToken) return;
+
+      const { collection, query, orderBy, limit, onSnapshot } = firebaseApi.firestoreModule;
+
+      function attach(orderField) {
+        const q = query(
+          collection(db, "notes"),
+          orderBy(orderField, "desc"),
+          limit(MAP_NOTE_LIMIT)
+        );
+        return onSnapshot(
+          q,
+          (snapshot) => {
+            if (token !== notesListenerToken) return;
+            console.log(`[紙條] 即時更新 ${snapshot.docs.length} 張`);
+            setNotesFromFirestoreDocs(snapshot.docs);
+          },
+          (err) => {
+            if (token !== notesListenerToken) return;
+            console.warn(`[紙條] 監聽 ${orderField} 失敗`, err);
+            if (orderField === "lastActivityAt") {
+              notesUnsubscribe = attach("createdAt");
+            } else {
+              fetchNotesOnce().catch((e) => {
+                console.warn("[紙條] 單次載入失敗", e);
+                showToast("無法讀取紙條，請檢查網路或 Firebase 規則");
+              });
+            }
+          }
+        );
       }
-      if (safeFallback.length > 0) {
-        notes = safeFallback;
-        return true;
-      }
-      if (notes.length > 0) return true;
-      if (applyNotesCache()) {
-        notes = normalizeNotes(notes);
-        return notes.length > 0;
-      }
-      return false;
+
+      notesUnsubscribe = attach("lastActivityAt");
+    }
+
+    async function fetchNotesOnce() {
+      if (!hasFirebase) return;
+      await ensureAuth();
+      const loaded = await loadFirebaseNotes();
+      notes = loaded;
+      if (notes.length) saveNotesCache();
+      renderNotes();
+      updateReplyAlert();
     }
 
     async function ensureNotesLoaded() {
       if (notes.length) return;
-      if (applyNotesCache()) {
-        notes = normalizeNotes(notes);
-        if (notes.length) {
-          renderNotes();
-          return;
-        }
+      if (applyNotesCache() && notes.length) {
+        renderNotes();
       }
       if (!hasFirebase) {
         notes = normalizeNotes(loadDemoNotes());
@@ -2114,7 +2172,12 @@
         if (notes.length) renderNotes();
         return;
       }
-      await refreshNotes({ background: true });
+      if (!notes.length) {
+        await fetchNotesOnce();
+      }
+      if (!notesUnsubscribe) {
+        await startNotesListener();
+      }
     }
 
     function noteHasImage(note) {
@@ -2207,12 +2270,8 @@
         try {
           updateThrowRemainingLabel();
           if (markersLayer) {
-            if (!notes.length) {
-              applyNotesCache();
-            }
-            if (notes.length || !markersLayer.getLayers().length) {
-              renderNotes();
-            }
+            if (!notes.length) applyNotesCache();
+            renderNotes();
           }
           updateReplyAlert();
           map.invalidateSize();
@@ -2239,14 +2298,8 @@
 
         applyAuthIdentity();
         loadPickedNotesLocal();
-        if (!notes.length) {
-          applyNotesCache();
-        }
-        const hadCache = notes.length > 0;
-        if (hadCache) {
-          els.cityText.textContent = currentCity;
-          renderNotes();
-        }
+        applyNotesCache();
+        renderNotes();
 
         await Promise.race([
           Promise.all([
@@ -2254,8 +2307,9 @@
             Promise.race([preloadImage("paper_ball.png"), delay(600)]).catch(() => {}),
             Promise.race([bootTileReady, delay(2500)]),
             hasFirebase
-              ? refreshNotes({ background: hadCache }).catch((err) => {
-                  console.warn("[開場] 紙條載入失敗，沿用快取", err);
+              ? startNotesListener().catch((err) => {
+                  console.warn("[開場] 即時監聽失敗，改單次載入", err);
+                  return fetchNotesOnce();
                 })
               : Promise.resolve(renderInitialNotes())
           ]),
@@ -2515,8 +2569,11 @@
           "上傳逾時，請檢查網路後再試"
         );
 
-        notes.unshift(note);
-        notes = sortNotesByActivity(notes);
+        const saved = normalizeNote(note);
+        if (saved) {
+          notes.unshift(saved);
+          notes = sortNotesByActivity(notes);
+        }
         if (!hasFirebase) saveDemoNotes();
         saveNotesCache();
 
@@ -2787,81 +2844,27 @@
       });
     }
 
-    async function refreshNotes(options = {}) {
-      if (notesRefreshPromise) return notesRefreshPromise;
-      notesRefreshPromise = refreshNotesImpl(options).finally(() => {
-        notesRefreshPromise = null;
-      });
-      return notesRefreshPromise;
-    }
-
-    async function refreshNotesImpl(options = {}) {
-      const { background = false } = options;
-      const snapshot = getNotesSnapshot();
-      const snapshotNormalized = normalizeNotes(snapshot);
-      const markerCountBefore = markersLayer?.getLayers().length || 0;
-      els.cityText.textContent = currentCity;
-
-      try {
-        if (hasFirebase) {
-          await ensureAuth();
-          const loaded = await loadFirebaseNotes();
-          applyNotesOrKeep(loaded, snapshotNormalized);
-        } else {
-          notes = normalizeNotes(loadDemoNotes());
-          if (!notes.length) {
-            notes = normalizeNotes([...seedNotes(currentLocation, currentCity), ...notes]);
-          }
+    async function refreshNotes() {
+      if (!hasFirebase) {
+        notes = normalizeNotes(loadDemoNotes());
+        if (!notes.length) {
+          notes = normalizeNotes([...seedNotes(currentLocation, currentCity), ...notes]);
         }
-      } catch (error) {
-        console.error("[紙條] 刷新失敗", error);
-        if (!applyNotesOrKeep([], snapshotNormalized) && !background) {
-          showToast("讀取失敗，顯示快取紙條");
-        }
-        if (!hasFirebase && !notes.length) {
-          notes = normalizeNotes([...seedNotes(currentLocation, currentCity), ...loadDemoNotes()]);
-        }
-      }
-
-      if (!hasFirebase && notes.length === 0) {
-        notes = normalizeNotes([...seedNotes(currentLocation, currentCity), ...notes]);
-      }
-
-      notes = normalizeNotes(notes);
-      notes = sortNotesByActivity(notes);
-
-      if (!notes.length && snapshotNormalized.length) {
-        notes = sortNotesByActivity(snapshotNormalized);
-        console.warn(`[紙條] 刷新後為空，還原 ${notes.length} 張快取紙條`);
-      }
-
-      if (notes.length) saveNotesCache();
-
-      if (!notes.length && (snapshotNormalized.length || markerCountBefore > 0)) {
-        console.warn("[紙條] 刷新無資料，保留地圖現狀");
+        renderNotes();
         updateReplyAlert();
         return;
       }
-
-      renderNotes();
-      updateReplyAlert();
+      await fetchNotesOnce();
+      if (!notesUnsubscribe) {
+        await startNotesListener();
+      }
     }
 
     function renderNotes() {
       if (!markersLayer) return;
+      markersLayer.clearLayers();
 
       const visibleNotes = normalizeNotes(applyFilter(notes));
-      if (!visibleNotes.length) {
-        if (markersLayer.getLayers().length && notes.length > 0) {
-          console.warn("[地圖] 篩選後無可顯示紙條，保留現有標記");
-          return;
-        }
-        markersLayer.clearLayers();
-        els.nearbyAlert.classList.remove("show");
-        return;
-      }
-
-      markersLayer.clearLayers();
 
       visibleNotes.forEach((note) => {
         try {
@@ -3609,7 +3612,6 @@
               )
             );
             if (snapshot.empty) {
-              console.warn("[紙條] lastActivityAt 查無資料，改用 createdAt");
               snapshot = await getDocs(
                 query(
                   collection(db, "notes"),
@@ -3619,7 +3621,7 @@
               );
             }
           } catch (err) {
-            console.warn("[紙條] lastActivityAt 查詢失敗，改用 createdAt", err);
+            console.warn("[紙條] 查詢失敗，改用 createdAt", err);
             snapshot = await getDocs(
               query(
                 collection(db, "notes"),
@@ -3629,40 +3631,10 @@
             );
           }
 
-          const all = snapshot.docs.map((doc) => {
-            const data = doc.data();
-            const imageUrls = Array.isArray(data.imageUrls) && data.imageUrls.length
-              ? data.imageUrls.filter(Boolean).slice(0, MAX_IMAGES_PER_NOTE)
-              : (data.imageUrl ? [data.imageUrl] : []);
-            const createdAt = data.createdAt?.toDate?.().toISOString() || new Date().toISOString();
-            const lastActivityAt = data.lastActivityAt?.toDate?.().toISOString()
-              || data.lastDriftAt?.toDate?.().toISOString()
-              || createdAt;
-            const loc = data.location;
-            const lat = loc?.latitude ?? loc?.lat;
-            const lng = loc?.longitude ?? loc?.lng;
-            return normalizeNote({
-              id: doc.id,
-              authorUid: data.authorUid,
-              type: data.type,
-              content: data.content,
-              imageUrl: imageUrls[0] || "",
-              imageUrls,
-              location: { lat, lng },
-              city: data.city,
-              createdAt,
-              lastActivityAt,
-              expiresAt: data.expiresAt?.toDate?.().toISOString() || addDays(new Date(), 30).toISOString(),
-              pickedCount: data.pickedCount || 0,
-              replyCount: data.replyCount || 0,
-              reportCount: data.reportCount || 0,
-              isSeed: Boolean(data.isSeed)
-            });
-          }).filter(Boolean);
-
-          return sortNotesByActivity(all.filter((item) =>
-            item.reportCount < 3 || isMyNote(item)
-          ));
+          const all = snapshot.docs.map(mapFirestoreDoc).filter(Boolean);
+          return sortNotesByActivity(
+            all.filter((item) => (item.reportCount || 0) < 3 || isMyNote(item))
+          );
         })(), 12000, "紙條載入逾時");
       } catch (err) {
         console.warn("[紙條] 載入失敗", err);
