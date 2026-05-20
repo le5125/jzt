@@ -1,0 +1,953 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#f6efe5" />
+  <title>丟紙條 JZT</title>
+
+  <!-- 地圖套件：Leaflet。這是免費地圖，不需要 Google Maps API key。 -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIINfQFu7uzU8yvepu9ZjY3OWnQafElyD4="
+    crossorigin=""
+  />
+
+  <style>
+    :root {
+      --paper: #fffaf1;
+      --paper-strong: #f7ce4d;
+      --ink: #231f20;
+      --muted: #756755;
+      --line: #e6d3bb;
+      --accent: #e5533d;
+      --blue: #2876d9;
+      font-family: "Microsoft JhengHei", "Noto Sans TC", system-ui, sans-serif;
+      color: var(--ink);
+      background: #f6efe5;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    button,
+    textarea,
+    input {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    #app {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+      overflow: hidden;
+      background: #f6efe5;
+    }
+
+    #map {
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+
+    .top-bar {
+      position: absolute;
+      z-index: 500;
+      top: max(14px, env(safe-area-inset-top));
+      left: 14px;
+      right: 14px;
+      display: flex;
+      justify-content: center;
+      pointer-events: none;
+    }
+
+    .city-button {
+      pointer-events: auto;
+      max-width: min(520px, 100%);
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      border: 1px solid rgba(35, 31, 32, 0.12);
+      border-radius: 999px;
+      padding: 10px 14px;
+      color: var(--ink);
+      background: rgba(255, 250, 241, 0.94);
+      box-shadow: 0 10px 34px rgba(43, 35, 28, 0.16);
+    }
+
+    .city-button span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .city-button strong {
+      flex: 0 0 auto;
+      font-size: 12px;
+      color: #7c4f26;
+    }
+
+    .bottom-actions {
+      position: absolute;
+      z-index: 500;
+      left: 50%;
+      bottom: max(20px, env(safe-area-inset-bottom));
+      display: grid;
+      grid-template-columns: 48px 74px 48px;
+      align-items: center;
+      gap: 12px;
+      transform: translateX(-50%);
+    }
+
+    .icon-button,
+    .throw-button,
+    .primary-button,
+    .secondary-button {
+      border: 0;
+      border-radius: 8px;
+      min-height: 44px;
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .icon-button {
+      width: 48px;
+      height: 48px;
+      background: var(--paper);
+      box-shadow: 0 10px 28px rgba(43, 35, 28, 0.18);
+      font-size: 24px;
+    }
+
+    .throw-button {
+      width: 74px;
+      height: 74px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: white;
+      box-shadow: 0 16px 32px rgba(148, 48, 31, 0.34);
+      font-size: 22px;
+    }
+
+    .primary-button {
+      padding: 0 16px;
+      background: var(--accent);
+      color: white;
+    }
+
+    .secondary-button {
+      padding: 0 16px;
+      background: #fff1d8;
+      color: #6e4420;
+    }
+
+    .primary-button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .sheet {
+      position: absolute;
+      z-index: 800;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      max-height: min(74vh, 560px);
+      padding: 18px;
+      border-radius: 18px 18px 0 0;
+      background: var(--paper);
+      box-shadow: 0 -16px 40px rgba(43, 35, 28, 0.2);
+      overflow: auto;
+      transform: translateY(105%);
+      transition: transform 0.2s ease;
+    }
+
+    .sheet.open {
+      transform: translateY(0);
+    }
+
+    .sheet-header,
+    .sheet-row,
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .sheet-header h2,
+    .page-header h1 {
+      margin: 0;
+      font-size: 20px;
+    }
+
+    .close-button {
+      width: 40px;
+      height: 40px;
+      border: 0;
+      border-radius: 50%;
+      background: #f0e1cd;
+      font-size: 26px;
+    }
+
+    textarea,
+    input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fffefb;
+      color: var(--ink);
+      outline: none;
+    }
+
+    textarea:focus,
+    input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(229, 83, 61, 0.12);
+    }
+
+    .throw-form,
+    .picked-note,
+    .city-search {
+      display: grid;
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .city-search {
+      grid-template-columns: 1fr auto;
+    }
+
+    .note-content {
+      margin: 0;
+      padding: 18px;
+      border: 1px solid #efdcc1;
+      border-radius: 8px;
+      background: #fffefb;
+      line-height: 1.8;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .note-meta {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin: 0;
+    }
+
+    .note-meta dt {
+      color: #8d7a66;
+      font-size: 12px;
+    }
+
+    .note-meta dd {
+      margin: 4px 0 0;
+      overflow-wrap: anywhere;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .alert {
+      position: absolute;
+      z-index: 500;
+      left: 50%;
+      bottom: 116px;
+      transform: translateX(-50%);
+      border-radius: 999px;
+      padding: 10px 14px;
+      color: white;
+      background: var(--ink);
+      box-shadow: 0 10px 26px rgba(35, 31, 32, 0.24);
+      display: none;
+    }
+
+    .alert.show {
+      display: block;
+    }
+
+    .paper-marker {
+      width: 28px;
+      height: 28px;
+      border: 2px solid white;
+      border-radius: 8px 8px 8px 2px;
+      background: var(--paper-strong);
+      box-shadow: 0 8px 18px rgba(57, 44, 20, 0.28);
+      transform: rotate(-8deg);
+    }
+
+    .user-marker {
+      width: 18px;
+      height: 18px;
+      border: 3px solid white;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 0 8px rgba(40, 118, 217, 0.18);
+    }
+
+    .page {
+      position: absolute;
+      z-index: 900;
+      inset: 0;
+      display: none;
+      padding: 18px;
+      background: #f6efe5;
+      overflow: auto;
+    }
+
+    .page.open {
+      display: block;
+    }
+
+    .note-list {
+      display: grid;
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .note-card {
+      padding: 16px;
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: 0 8px 22px rgba(43, 35, 28, 0.1);
+    }
+
+    .note-card p {
+      margin: 0 0 10px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .result-row {
+      width: 100%;
+      min-height: 44px;
+      margin-top: 8px;
+      border: 0;
+      border-radius: 8px;
+      background: #fffefb;
+      padding: 10px 12px;
+      text-align: left;
+    }
+
+    .toast {
+      position: absolute;
+      z-index: 1000;
+      left: 50%;
+      top: 76px;
+      max-width: min(520px, calc(100% - 28px));
+      transform: translateX(-50%);
+      border-radius: 999px;
+      padding: 10px 14px;
+      color: white;
+      background: rgba(35, 31, 32, 0.92);
+      box-shadow: 0 10px 28px rgba(35, 31, 32, 0.2);
+      display: none;
+    }
+
+    .toast.show {
+      display: block;
+    }
+
+    @media (max-width: 520px) {
+      .note-meta {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main id="app">
+    <div id="map"></div>
+
+    <div class="top-bar">
+      <button id="cityButton" class="city-button" type="button">
+        <span id="cityText">台北</span>
+        <strong id="locateText">重新定位</strong>
+      </button>
+    </div>
+
+    <div class="bottom-actions" aria-label="主要操作">
+      <button id="myNotesButton" class="icon-button" type="button" title="我的紙條">☰</button>
+      <button id="openThrowButton" class="throw-button" type="button" title="丟紙條">丟</button>
+      <button id="locateButton" class="icon-button" type="button" title="定位">⌖</button>
+    </div>
+
+    <div id="nearbyAlert" class="alert">附近有 0 張紙條</div>
+    <div id="toast" class="toast"></div>
+
+    <section id="throwSheet" class="sheet" aria-label="丟紙條">
+      <header class="sheet-header">
+        <h2>丟紙條</h2>
+        <button class="close-button" type="button" data-close>×</button>
+      </header>
+      <form id="throwForm" class="throw-form">
+        <textarea id="noteInput" maxlength="140" rows="5" placeholder="把想留下的話寫成一張紙條"></textarea>
+        <div class="sheet-row">
+          <span id="countText" class="muted">140 字</span>
+          <button id="submitNoteButton" class="primary-button" type="submit" disabled>丟出去</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="pickSheet" class="sheet" aria-label="撿到紙條">
+      <header class="sheet-header">
+        <h2>撿到紙條</h2>
+        <button class="close-button" type="button" data-close>×</button>
+      </header>
+      <article class="picked-note">
+        <p id="pickedContent" class="note-content"></p>
+        <dl class="note-meta">
+          <div>
+            <dt>城市</dt>
+            <dd id="pickedCity">-</dd>
+          </div>
+          <div>
+            <dt>被撿起</dt>
+            <dd id="pickedCount">0 次</dd>
+          </div>
+          <div>
+            <dt>留下時間</dt>
+            <dd id="pickedTime">-</dd>
+          </div>
+        </dl>
+        <button class="secondary-button" type="button" disabled>回覆功能下一版接上</button>
+      </article>
+    </section>
+
+    <section id="citySheet" class="sheet" aria-label="切換城市">
+      <header class="sheet-header">
+        <h2>切換城市</h2>
+        <button class="close-button" type="button" data-close>×</button>
+      </header>
+      <form id="cityForm" class="city-search">
+        <input id="cityInput" placeholder="搜尋城市或地標，例如：台中、信義區" />
+        <button class="secondary-button" type="submit">搜尋</button>
+      </form>
+      <div id="cityResults"></div>
+    </section>
+
+    <section id="myNotesPage" class="page" aria-label="我的紙條">
+      <header class="page-header">
+        <button id="backButton" class="icon-button" type="button" title="返回地圖">‹</button>
+        <h1>我的紙條</h1>
+      </header>
+      <div id="myNotesList" class="note-list"></div>
+    </section>
+  </main>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <script type="module">
+    /*
+      你以後只需要改這一段 Firebase 設定。
+      如果全部保持空白，網頁會用 demo 模式，資料只存在目前瀏覽器裡。
+    */
+    const firebaseConfig = {
+      apiKey: "",
+      authDomain: "",
+      projectId: "",
+      storageBucket: "",
+      messagingSenderId: "",
+      appId: ""
+    };
+
+    /*
+      如果你之後有 LINE LIFF ID，也填這裡。
+      先空白沒關係，GitHub 網頁照樣能測。
+    */
+    const LIFF_ID = "";
+
+    const hasFirebase = Boolean(
+      firebaseConfig.apiKey &&
+      firebaseConfig.authDomain &&
+      firebaseConfig.projectId &&
+      firebaseConfig.appId
+    );
+
+    let firebaseApi = null;
+    let db = null;
+    let auth = null;
+    let currentUserId = localStorage.getItem("jzt_demo_uid") || crypto.randomUUID();
+    localStorage.setItem("jzt_demo_uid", currentUserId);
+
+    if (hasFirebase) {
+      const appModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-app.js");
+      const authModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-auth.js");
+      const firestoreModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-firestore.js");
+
+      const app = appModule.initializeApp(firebaseConfig);
+      auth = authModule.getAuth(app);
+      db = firestoreModule.getFirestore(app);
+      firebaseApi = { authModule, firestoreModule };
+
+      await authModule.signInAnonymously(auth);
+      currentUserId = auth.currentUser.uid;
+    }
+
+    const taipei = { lat: 25.033, lng: 121.5654 };
+    let currentLocation = { ...taipei };
+    let currentCity = "台北";
+    let notes = loadDemoNotes();
+    let selectedNote = null;
+    let markersLayer = null;
+    let userMarker = null;
+
+    const els = {
+      cityButton: document.querySelector("#cityButton"),
+      cityText: document.querySelector("#cityText"),
+      locateText: document.querySelector("#locateText"),
+      locateButton: document.querySelector("#locateButton"),
+      openThrowButton: document.querySelector("#openThrowButton"),
+      throwSheet: document.querySelector("#throwSheet"),
+      pickSheet: document.querySelector("#pickSheet"),
+      citySheet: document.querySelector("#citySheet"),
+      noteInput: document.querySelector("#noteInput"),
+      countText: document.querySelector("#countText"),
+      submitNoteButton: document.querySelector("#submitNoteButton"),
+      throwForm: document.querySelector("#throwForm"),
+      pickedContent: document.querySelector("#pickedContent"),
+      pickedCity: document.querySelector("#pickedCity"),
+      pickedCount: document.querySelector("#pickedCount"),
+      pickedTime: document.querySelector("#pickedTime"),
+      nearbyAlert: document.querySelector("#nearbyAlert"),
+      myNotesButton: document.querySelector("#myNotesButton"),
+      myNotesPage: document.querySelector("#myNotesPage"),
+      myNotesList: document.querySelector("#myNotesList"),
+      backButton: document.querySelector("#backButton"),
+      cityForm: document.querySelector("#cityForm"),
+      cityInput: document.querySelector("#cityInput"),
+      cityResults: document.querySelector("#cityResults"),
+      toast: document.querySelector("#toast")
+    };
+
+    const map = L.map("map", { zoomControl: false }).setView([taipei.lat, taipei.lng], 15);
+    L.control.zoom({ position: "bottomright" }).addTo(map);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap"
+    }).addTo(map);
+
+    markersLayer = L.layerGroup().addTo(map);
+    userMarker = L.marker([taipei.lat, taipei.lng], {
+      icon: L.divIcon({
+        className: "",
+        html: '<div class="user-marker"></div>',
+        iconSize: [22, 22],
+        iconAnchor: [11, 11]
+      })
+    }).addTo(map);
+
+    els.cityButton.addEventListener("click", () => openSheet("city"));
+    els.locateButton.addEventListener("click", locateMe);
+    els.openThrowButton.addEventListener("click", () => openSheet("throw"));
+    els.myNotesButton.addEventListener("click", showMyNotes);
+    els.backButton.addEventListener("click", () => els.myNotesPage.classList.remove("open"));
+    document.querySelectorAll("[data-close]").forEach((button) => {
+      button.addEventListener("click", closeSheets);
+    });
+
+    els.noteInput.addEventListener("input", () => {
+      const left = 140 - els.noteInput.value.length;
+      els.countText.textContent = `${left} 字`;
+      els.submitNoteButton.disabled = els.noteInput.value.trim().length === 0;
+    });
+
+    els.throwForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const content = els.noteInput.value.trim().slice(0, 140);
+      if (!content) return;
+
+      const note = {
+        id: crypto.randomUUID(),
+        authorUid: currentUserId,
+        type: "text",
+        content,
+        location: { ...currentLocation },
+        city: currentCity,
+        createdAt: new Date().toISOString(),
+        expiresAt: addDays(new Date(), 30).toISOString(),
+        pickedCount: 0,
+        replyCount: 0,
+        isSeed: false
+      };
+
+      await saveNote(note);
+      notes.unshift(note);
+      saveDemoNotes();
+      els.noteInput.value = "";
+      els.countText.textContent = "140 字";
+      els.submitNoteButton.disabled = true;
+      closeSheets();
+      renderNotes();
+      showToast("紙條已丟出去");
+    });
+
+    els.cityForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const keyword = els.cityInput.value.trim();
+      if (!keyword) return;
+      els.cityResults.innerHTML = '<p class="muted">搜尋中...</p>';
+      const results = await searchCity(keyword);
+      if (results.length === 0) {
+        els.cityResults.innerHTML = '<p class="muted">找不到結果，換個關鍵字試試。</p>';
+        return;
+      }
+      els.cityResults.innerHTML = "";
+      results.forEach((result) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "result-row";
+        button.textContent = result.city;
+        button.addEventListener("click", async () => {
+          currentCity = result.city;
+          currentLocation = result.center;
+          map.setView([result.center.lat, result.center.lng], 15);
+          userMarker.setLatLng([result.center.lat, result.center.lng]);
+          closeSheets();
+          await refreshNotes();
+        });
+        els.cityResults.appendChild(button);
+      });
+    });
+
+    await refreshNotes();
+    locateMe();
+
+    function openSheet(name) {
+      closeSheets();
+      if (name === "throw") els.throwSheet.classList.add("open");
+      if (name === "pick") els.pickSheet.classList.add("open");
+      if (name === "city") els.citySheet.classList.add("open");
+    }
+
+    function closeSheets() {
+      els.throwSheet.classList.remove("open");
+      els.pickSheet.classList.remove("open");
+      els.citySheet.classList.remove("open");
+    }
+
+    async function locateMe() {
+      els.locateText.textContent = "定位中";
+
+      if (!navigator.geolocation) {
+        showToast("這個瀏覽器不支援定位，先用台北測試");
+        els.locateText.textContent = "重新定位";
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          currentLocation = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          };
+          currentCity = await reverseCity(currentLocation);
+          map.setView([currentLocation.lat, currentLocation.lng], 15);
+          userMarker.setLatLng([currentLocation.lat, currentLocation.lng]);
+          await refreshNotes();
+          els.locateText.textContent = "重新定位";
+        },
+        async () => {
+          showToast("無法取得定位，先用台北測試");
+          els.locateText.textContent = "重新定位";
+          await refreshNotes();
+        },
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    }
+
+    async function refreshNotes() {
+      els.cityText.textContent = currentCity;
+
+      if (hasFirebase) {
+        notes = await loadFirebaseNotes();
+      } else {
+        notes = loadDemoNotes();
+      }
+
+      if (notes.length < 2) {
+        notes = [...notes, ...seedNotes(currentLocation, currentCity)];
+      }
+
+      renderNotes();
+    }
+
+    function renderNotes() {
+      markersLayer.clearLayers();
+
+      notes.forEach((note) => {
+        const marker = L.marker([note.location.lat, note.location.lng], {
+          title: note.content,
+          icon: L.divIcon({
+            className: "",
+            html: '<div class="paper-marker"></div>',
+            iconSize: [34, 34],
+            iconAnchor: [17, 17]
+          })
+        });
+
+        marker.on("click", () => pickNote(note));
+        marker.addTo(markersLayer);
+      });
+
+      const nearby = notes.filter((note) => distanceMeters(currentLocation, note.location) <= 50);
+      if (nearby.length > 0) {
+        els.nearbyAlert.textContent = `附近有 ${nearby.length} 張紙條`;
+        els.nearbyAlert.classList.add("show");
+      } else {
+        els.nearbyAlert.classList.remove("show");
+      }
+    }
+
+    async function pickNote(note) {
+      selectedNote = note;
+      note.pickedCount += 1;
+      await updatePickedCount(note);
+      saveDemoNotes();
+
+      els.pickedContent.textContent = note.content;
+      els.pickedCity.textContent = note.city;
+      els.pickedCount.textContent = `${note.pickedCount} 次`;
+      els.pickedTime.textContent = new Date(note.createdAt).toLocaleString("zh-TW");
+      openSheet("pick");
+    }
+
+    function showMyNotes() {
+      const mine = notes.filter((note) => note.authorUid === currentUserId);
+      els.myNotesList.innerHTML = "";
+
+      if (mine.length === 0) {
+        els.myNotesList.innerHTML = '<p class="muted">目前還沒有丟出的紙條。</p>';
+      } else {
+        mine.forEach((note) => {
+          const card = document.createElement("article");
+          card.className = "note-card";
+          card.innerHTML = `
+            <p></p>
+            <span class="muted">${escapeHtml(note.city)} · 被撿起 ${note.pickedCount} 次</span>
+          `;
+          card.querySelector("p").textContent = note.content;
+          els.myNotesList.appendChild(card);
+        });
+      }
+
+      els.myNotesPage.classList.add("open");
+    }
+
+    function loadDemoNotes() {
+      const saved = localStorage.getItem("jzt_notes");
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch {
+          return [];
+        }
+      }
+      return [];
+    }
+
+    function saveDemoNotes() {
+      if (!hasFirebase) {
+        const userNotes = notes.filter((note) => !note.isSeed);
+        localStorage.setItem("jzt_notes", JSON.stringify(userNotes));
+      }
+    }
+
+    function seedNotes(center, city) {
+      const now = new Date().toISOString();
+      return [
+        {
+          id: "seed-1",
+          authorUid: "seed",
+          type: "text",
+          content: "第一張測試紙條：今天也把話輕輕放在路邊。",
+          location: { lat: center.lat + 0.002, lng: center.lng + 0.0015 },
+          city,
+          createdAt: now,
+          expiresAt: addDays(new Date(), 30).toISOString(),
+          pickedCount: 0,
+          replyCount: 0,
+          isSeed: true
+        },
+        {
+          id: "seed-2",
+          authorUid: "seed",
+          type: "text",
+          content: "路過的人你好，願你今天剛好遇到一件小好事。",
+          location: { lat: center.lat - 0.0012, lng: center.lng - 0.001 },
+          city,
+          createdAt: now,
+          expiresAt: addDays(new Date(), 30).toISOString(),
+          pickedCount: 0,
+          replyCount: 0,
+          isSeed: true
+        }
+      ];
+    }
+
+    async function saveNote(note) {
+      if (!hasFirebase) return;
+      const {
+        addDoc,
+        collection,
+        GeoPoint,
+        serverTimestamp,
+        Timestamp
+      } = firebaseApi.firestoreModule;
+
+      const expiresAt = addDays(new Date(), 30);
+      const docRef = await addDoc(collection(db, "notes"), {
+        authorUid: currentUserId,
+        type: "text",
+        content: note.content,
+        location: new GeoPoint(note.location.lat, note.location.lng),
+        city: note.city,
+        geohash: `${note.location.lat.toFixed(3)},${note.location.lng.toFixed(3)}`,
+        createdAt: serverTimestamp(),
+        expiresAt: Timestamp.fromDate(expiresAt),
+        pickedCount: 0,
+        replyCount: 0,
+        isSeed: false,
+        lastDriftAt: serverTimestamp()
+      });
+      note.id = docRef.id;
+    }
+
+    async function loadFirebaseNotes() {
+      const {
+        collection,
+        getDocs,
+        limit,
+        orderBy,
+        query,
+        Timestamp,
+        where
+      } = firebaseApi.firestoreModule;
+
+      const snapshot = await getDocs(
+        query(
+          collection(db, "notes"),
+          where("city", "==", currentCity),
+          where("expiresAt", ">", Timestamp.now()),
+          orderBy("expiresAt", "asc"),
+          limit(50)
+        )
+      );
+
+      return snapshot.docs.map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          authorUid: data.authorUid,
+          type: data.type,
+          content: data.content,
+          location: {
+            lat: data.location.latitude,
+            lng: data.location.longitude
+          },
+          city: data.city,
+          createdAt: data.createdAt?.toDate?.().toISOString() || new Date().toISOString(),
+          expiresAt: data.expiresAt?.toDate?.().toISOString() || addDays(new Date(), 30).toISOString(),
+          pickedCount: data.pickedCount || 0,
+          replyCount: data.replyCount || 0,
+          isSeed: Boolean(data.isSeed)
+        };
+      });
+    }
+
+    async function updatePickedCount(note) {
+      if (!hasFirebase || note.id.startsWith("seed-")) return;
+      const { doc, increment, updateDoc } = firebaseApi.firestoreModule;
+      await updateDoc(doc(db, "notes", note.id), {
+        pickedCount: increment(1)
+      });
+    }
+
+    async function reverseCity(location) {
+      try {
+        const url = new URL("https://nominatim.openstreetmap.org/reverse");
+        url.searchParams.set("format", "jsonv2");
+        url.searchParams.set("lat", String(location.lat));
+        url.searchParams.set("lon", String(location.lng));
+        url.searchParams.set("accept-language", "zh-TW");
+        const response = await fetch(url);
+        const data = await response.json();
+        return data.address?.city || data.address?.town || data.address?.county || data.address?.state || "附近";
+      } catch {
+        return "附近";
+      }
+    }
+
+    async function searchCity(keyword) {
+      try {
+        const url = new URL("https://nominatim.openstreetmap.org/search");
+        url.searchParams.set("format", "jsonv2");
+        url.searchParams.set("q", keyword);
+        url.searchParams.set("limit", "5");
+        url.searchParams.set("accept-language", "zh-TW");
+        const response = await fetch(url);
+        const data = await response.json();
+        return data.map((item) => ({
+          city: item.display_name.split(",")[0],
+          center: { lat: Number(item.lat), lng: Number(item.lon) }
+        }));
+      } catch {
+        return [];
+      }
+    }
+
+    function addDays(date, days) {
+      const result = new Date(date);
+      result.setDate(result.getDate() + days);
+      return result;
+    }
+
+    function distanceMeters(a, b) {
+      const earthRadius = 6371000;
+      const toRad = (value) => value * Math.PI / 180;
+      const dLat = toRad(b.lat - a.lat);
+      const dLng = toRad(b.lng - a.lng);
+      const lat1 = toRad(a.lat);
+      const lat2 = toRad(b.lat);
+      const h = Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+      return 2 * earthRadius * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+    }
+
+    function showToast(message) {
+      els.toast.textContent = message;
+      els.toast.classList.add("show");
+      window.setTimeout(() => els.toast.classList.remove("show"), 2200);
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+  </script>
+</body>
+</html>
