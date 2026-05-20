@@ -595,6 +595,69 @@
       overflow: hidden;
     }
 
+    .reply-footer {
+      flex-shrink: 0;
+      padding: 14px 0 4px;
+      border-top: 2.5px dashed var(--ink);
+      margin-top: auto;
+    }
+    .reply-compose-trigger {
+      width: 100%;
+    }
+
+    .reply-compose-backdrop {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      background: rgba(31, 24, 18, 0.28);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.22s ease;
+    }
+    .reply-compose-backdrop.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .reply-compose-drawer {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 3;
+      max-height: min(72vh, 520px);
+      overflow-y: auto;
+      overflow-x: hidden;
+      background: var(--paper-light);
+      border-top: 2.5px solid var(--ink);
+      border-radius: 20px 24px 0 0;
+      padding: 14px 18px calc(20px + env(safe-area-inset-bottom));
+      transform: translateY(105%);
+      transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+      box-shadow: 0 -4px 0 var(--ink);
+    }
+    .reply-compose-drawer.open {
+      transform: translateY(0);
+    }
+    .reply-compose-header {
+      margin-bottom: 10px;
+    }
+    .reply-compose-header h3 {
+      margin: 0;
+      font-family: "Caveat", cursive;
+      font-size: 22px;
+      color: var(--ink);
+    }
+    .reply-compose-drawer .reply-form {
+      margin-top: 0;
+    }
+    .reply-sticker-block {
+      margin-top: 12px;
+    }
+    .reply-sticker-block .muted {
+      margin: 0 0 8px;
+    }
+
     /* 高版抽屜：用於「我的紙條」這種內容多的，撐到接近全螢幕 */
     .sheet-tall {
       max-height: calc(100vh - 40px);
@@ -981,18 +1044,6 @@
       overflow-x: hidden;
       -webkit-overflow-scrolling: touch;
       padding-bottom: 8px;
-    }
-
-    .reply-compose {
-      flex-shrink: 0;
-      border-top: 2.5px dashed var(--ink);
-      padding-top: 14px;
-      margin-top: auto;
-      display: grid;
-      gap: 12px;
-    }
-    .reply-compose .reply-form {
-      margin-top: 0;
     }
 
     .reply-card {
@@ -1590,7 +1641,15 @@
       <div id="replyList" class="reply-list reply-list-full">
         <p class="muted">載入回覆中…</p>
       </div>
-      <div class="reply-compose">
+      <div class="reply-footer">
+        <button id="openReplyComposeButton" class="primary-button reply-compose-trigger" type="button">寫回覆</button>
+      </div>
+      <div id="replyComposeBackdrop" class="reply-compose-backdrop" hidden aria-hidden="true"></div>
+      <div id="replyComposeDrawer" class="reply-compose-drawer" aria-hidden="true">
+        <header class="reply-compose-header sheet-row">
+          <h3>寫回覆</h3>
+          <button id="closeReplyComposeButton" class="close-button" type="button" aria-label="關閉">×</button>
+        </header>
         <form id="replyForm" class="reply-form">
           <textarea id="replyInput" maxlength="140" rows="4" placeholder="寫一則回覆⋯"></textarea>
           <div class="sheet-row">
@@ -1598,8 +1657,8 @@
             <button id="submitReplyButton" class="primary-button" type="submit" disabled>送出</button>
           </div>
         </form>
-        <div>
-          <p class="muted" style="margin-bottom:8px">貼圖回覆</p>
+        <div class="reply-sticker-block">
+          <p class="muted">貼圖快捷（插入到這則回覆）</p>
           <div id="stickerRow" class="sticker-row">
             <button class="sticker-button" type="button" data-sticker="👍">👍</button>
             <button class="sticker-button" type="button" data-sticker="❤️">❤️</button>
@@ -1888,6 +1947,10 @@
       replyEntryCount: document.querySelector("#replyEntryCount"),
       replySheet: document.querySelector("#replySheet"),
       replyBackButton: document.querySelector("#replyBackButton"),
+      openReplyComposeButton: document.querySelector("#openReplyComposeButton"),
+      replyComposeDrawer: document.querySelector("#replyComposeDrawer"),
+      replyComposeBackdrop: document.querySelector("#replyComposeBackdrop"),
+      closeReplyComposeButton: document.querySelector("#closeReplyComposeButton"),
       replyList: document.querySelector("#replyList"),
       replyForm: document.querySelector("#replyForm"),
       replyInput: document.querySelector("#replyInput"),
@@ -2502,9 +2565,13 @@
     els.replyAlert.addEventListener("click", () => showMyNotes({ repliesOnly: true }));
     els.openRepliesButton.addEventListener("click", () => openRepliesSheet());
     els.replyBackButton.addEventListener("click", () => {
+      closeReplyComposeDrawer();
       if (selectedNote) openSheet("pick");
       else closeSheets();
     });
+    els.openReplyComposeButton.addEventListener("click", () => openReplyComposeDrawer());
+    els.closeReplyComposeButton.addEventListener("click", () => closeReplyComposeDrawer());
+    els.replyComposeBackdrop.addEventListener("click", () => closeReplyComposeDrawer());
     els.nearbyListButton.addEventListener("click", showNearbyList);
     els.nearbyAlert.addEventListener("click", pickNearestNote);
     els.replyInput.addEventListener("input", () => {
@@ -2521,12 +2588,29 @@
       els.replyInput.value = "";
       els.replyCountText.textContent = "140 字";
       updateReplySubmitState();
+      closeReplyComposeDrawer();
     });
-    async function handleStickerPick(event) {
+    function insertIntoReplyInput(text) {
+      const input = els.replyInput;
+      if (!input || !text) return;
+      const start = input.selectionStart ?? input.value.length;
+      const end = input.selectionEnd ?? input.value.length;
+      const combined = (input.value.slice(0, start) + text + input.value.slice(end)).slice(0, 140);
+      input.value = combined;
+      const cursor = Math.min(start + text.length, combined.length);
+      input.setSelectionRange(cursor, cursor);
+      input.focus();
+      els.replyCountText.textContent = `${140 - combined.length} 字`;
+      updateReplySubmitState();
+    }
+    function handleStickerPick(event) {
       const button = eventTargetElement(event.target)?.closest("[data-sticker]");
-      if (!button || !selectedNote || replyingInProgress) return;
+      if (!button || replyingInProgress) return;
       event.preventDefault();
-      await submitReply({ type: "sticker", content: button.dataset.sticker });
+      if (!els.replyComposeDrawer.classList.contains("open")) {
+        openReplyComposeDrawer();
+      }
+      insertIntoReplyInput(button.dataset.sticker);
     }
     els.stickerRow.addEventListener("click", handleStickerPick);
 
@@ -2806,7 +2890,27 @@
       document.getElementById("app")?.classList.toggle("has-sheet-open", anyOpen);
     }
 
+    function closeReplyComposeDrawer() {
+      if (!els.replyComposeDrawer) return;
+      els.replyComposeDrawer.classList.remove("open");
+      els.replyComposeDrawer.setAttribute("aria-hidden", "true");
+      if (els.replyComposeBackdrop) {
+        els.replyComposeBackdrop.classList.remove("show");
+        els.replyComposeBackdrop.hidden = true;
+      }
+    }
+
+    function openReplyComposeDrawer() {
+      if (!selectedNote || !els.replyComposeDrawer) return;
+      els.replyComposeBackdrop.hidden = false;
+      els.replyComposeBackdrop.classList.add("show");
+      els.replyComposeDrawer.classList.add("open");
+      els.replyComposeDrawer.setAttribute("aria-hidden", "false");
+      requestAnimationFrame(() => els.replyInput?.focus());
+    }
+
     function closeSheets(except) {
+      closeReplyComposeDrawer();
       const keep = typeof except === "string" ? except : null;
       if (keep !== "throw") els.throwSheet.classList.remove("open");
       if (keep !== "pick") els.pickSheet.classList.remove("open");
@@ -3139,6 +3243,7 @@
 
     async function openRepliesSheet() {
       if (!selectedNote) return;
+      closeReplyComposeDrawer();
       openSheet("replies");
       els.replyList.innerHTML = '<p class="muted">載入回覆中…</p>';
       try {
