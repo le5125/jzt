@@ -63,6 +63,97 @@
       z-index: 1;
     }
 
+    /*
+      Leaflet 地圖必要樣式。
+      原本只靠外部 leaflet.css，手機 WebView 有時載不到，地圖瓦片就會像圖片一樣亂排。
+      這裡把最重要的樣式直接放進 HTML，讓 GitHub Pages / LINE / 手機瀏覽器都穩定。
+    */
+    .leaflet-pane,
+    .leaflet-tile,
+    .leaflet-marker-icon,
+    .leaflet-marker-shadow,
+    .leaflet-tile-container,
+    .leaflet-pane > svg,
+    .leaflet-pane > canvas,
+    .leaflet-zoom-box,
+    .leaflet-image-layer,
+    .leaflet-layer {
+      position: absolute;
+      left: 0;
+      top: 0;
+    }
+
+    .leaflet-container {
+      overflow: hidden;
+      touch-action: pan-x pan-y;
+      background: #ddd;
+      outline-offset: 1px;
+      font-family: "Microsoft JhengHei", "Noto Sans TC", system-ui, sans-serif;
+    }
+
+    .leaflet-tile,
+    .leaflet-marker-icon,
+    .leaflet-marker-shadow {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .leaflet-tile {
+      filter: inherit;
+      visibility: hidden;
+      border: 0;
+    }
+
+    .leaflet-tile-loaded {
+      visibility: inherit;
+    }
+
+    .leaflet-zoom-animated {
+      transform-origin: 0 0;
+    }
+
+    .leaflet-interactive {
+      cursor: pointer;
+    }
+
+    .leaflet-control {
+      position: relative;
+      z-index: 800;
+      pointer-events: visiblePainted;
+      pointer-events: auto;
+    }
+
+    .leaflet-top,
+    .leaflet-bottom {
+      position: absolute;
+      z-index: 1000;
+      pointer-events: none;
+    }
+
+    .leaflet-top {
+      top: 0;
+    }
+
+    .leaflet-right {
+      right: 0;
+    }
+
+    .leaflet-bottom {
+      bottom: 0;
+    }
+
+    .leaflet-left {
+      left: 0;
+    }
+
+    .leaflet-control-zoom {
+      display: none;
+    }
+
+    .leaflet-control-attribution {
+      display: none;
+    }
+
     .top-bar {
       position: absolute;
       z-index: 500;
