@@ -376,8 +376,8 @@
       transition: opacity 0.25s ease, visibility 0.25s;
     }
 
-    /* 寫紙條時底部三欄藏到抽屜下面，避免遮住表單 */
-    body.throw-sheet-open .bottom-bar {
+    /* 任一抽屜開啟時，底部三欄隱藏，避免擋住內容 */
+    body.sheet-open .bottom-bar {
       opacity: 0;
       visibility: hidden;
       pointer-events: none;
@@ -577,10 +577,9 @@
       transform: translateY(110%);
       transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);
     }
-    .sheet.open { transform: translateY(0); }
-
-    #throwSheet.open {
+    .sheet.open {
       z-index: 900;
+      transform: translateY(0);
     }
 
     /* 高版抽屜：用於「我的紙條」這種內容多的，撐到接近全螢幕 */
@@ -2074,9 +2073,6 @@
 
         syncPickedNotesFromFirebase().catch((err) => console.warn("[背景] 撿記錄同步失敗", err));
         locateMe({ refreshAfter: false }).catch((err) => console.warn("[背景] 定位失敗", err));
-        if (hasFirebase) {
-          refreshNotes({ background: true }).catch((err) => console.warn("[背景] 紙條載入失敗", err));
-        }
       }
 
       finishBootRef = finishBoot;
@@ -2154,7 +2150,10 @@
       showToast("已重新整理");
     });
     els.openThrowButton.addEventListener("click", () => openSheet("throw"));
-    els.myNotesButton.addEventListener("click", () => showMyNotes({ repliesOnly: false }));
+    els.myNotesButton.addEventListener("click", () => {
+      if (els.myNotesPage.classList.contains("open")) return;
+      showMyNotes({ repliesOnly: false });
+    });
     els.replyAlert.addEventListener("click", () => showMyNotes({ repliesOnly: true }));
     els.nearbyListButton.addEventListener("click", showNearbyList);
     els.nearbyAlert.addEventListener("click", pickNearestNote);
@@ -2439,25 +2438,25 @@
       });
     }
 
+    let myNotesLoadToken = 0;
+
+    function closeSheets(except) {
+      if (except !== "throw") els.throwSheet.classList.remove("open");
+      if (except !== "pick") els.pickSheet.classList.remove("open");
+      if (except !== "city") els.citySheet.classList.remove("open");
+      if (except !== "nearby") els.nearbySheet.classList.remove("open");
+      if (except !== "myNotes") els.myNotesPage.classList.remove("open");
+      if (!except) document.body.classList.remove("sheet-open");
+    }
+
     function openSheet(name) {
-      closeSheets();
-      if (name === "throw") {
-        els.throwSheet.classList.add("open");
-        document.body.classList.add("throw-sheet-open");
-      }
+      closeSheets(name);
+      if (name === "throw") els.throwSheet.classList.add("open");
       if (name === "pick") els.pickSheet.classList.add("open");
       if (name === "city") els.citySheet.classList.add("open");
       if (name === "nearby") els.nearbySheet.classList.add("open");
       if (name === "myNotes") els.myNotesPage.classList.add("open");
-    }
-
-    function closeSheets() {
-      els.throwSheet.classList.remove("open");
-      els.pickSheet.classList.remove("open");
-      els.citySheet.classList.remove("open");
-      els.nearbySheet.classList.remove("open");
-      els.myNotesPage.classList.remove("open");
-      document.body.classList.remove("throw-sheet-open");
+      document.body.classList.add("sheet-open");
     }
 
     /*
@@ -2823,44 +2822,55 @@
 
     async function showMyNotes(options = {}) {
       const { repliesOnly = false } = options;
-      closeSheets();
+      const token = ++myNotesLoadToken;
 
+      closeSheets("myNotes");
       els.myNotesTitle.textContent = repliesOnly ? "有回覆的紙條" : "我的紙條";
       els.myNickname.textContent = `你是「${nicknameOf(currentUserId)}」`;
-
-      let mine = notes.filter((note) => note.authorUid === currentUserId);
-      els.myNotesList.innerHTML = "";
-
-      if (repliesOnly) {
-        const withReplies = [];
-        for (const note of mine) {
-          const replies = await loadReplies(note);
-          if (replies.length > 0) withReplies.push({ note, replies });
-        }
-        mine = withReplies.map((item) => item.note);
-
-        if (!withReplies.length) {
-          els.myNotesList.innerHTML = '<p class="muted">目前還沒有人回覆你的紙條。</p>';
-          openSheet("myNotes");
-          return;
-        }
-
-        for (const { note, replies } of withReplies) {
-          markNoteRepliesSeen(note.id, note.replyCount || replies.length);
-          renderMyNoteCard(note, replies);
-        }
-      } else if (mine.length === 0) {
-        els.myNotesList.innerHTML = '<p class="muted">目前還沒有丟出的紙條。</p>';
-      } else {
-        for (const note of mine) {
-          const replies = await loadReplies(note);
-          markNoteRepliesSeen(note.id, note.replyCount || replies.length);
-          renderMyNoteCard(note, replies);
-        }
-      }
-
-      updateReplyAlert();
+      els.myNotesList.innerHTML = '<p class="muted">載入中…</p>';
       openSheet("myNotes");
+
+      try {
+        let mine = notes.filter((note) => note.authorUid === currentUserId);
+        if (token !== myNotesLoadToken) return;
+
+        els.myNotesList.innerHTML = "";
+
+        if (repliesOnly) {
+          const withReplies = [];
+          for (const note of mine) {
+            const replies = await loadReplies(note);
+            if (token !== myNotesLoadToken) return;
+            if (replies.length > 0) withReplies.push({ note, replies });
+          }
+
+          if (!withReplies.length) {
+            els.myNotesList.innerHTML = '<p class="muted">目前還沒有人回覆你的紙條。</p>';
+            updateReplyAlert();
+            return;
+          }
+
+          for (const { note, replies } of withReplies) {
+            markNoteRepliesSeen(note.id, note.replyCount || replies.length);
+            renderMyNoteCard(note, replies);
+          }
+        } else if (mine.length === 0) {
+          els.myNotesList.innerHTML = '<p class="muted">目前還沒有丟出的紙條。</p>';
+        } else {
+          for (const note of mine) {
+            const replies = await loadReplies(note);
+            if (token !== myNotesLoadToken) return;
+            markNoteRepliesSeen(note.id, note.replyCount || replies.length);
+            renderMyNoteCard(note, replies);
+          }
+        }
+
+        updateReplyAlert();
+      } catch (err) {
+        console.error("[我的紙條] 載入失敗", err);
+        if (token !== myNotesLoadToken) return;
+        els.myNotesList.innerHTML = '<p class="muted">載入失敗，請稍後再試。</p>';
+      }
     }
 
     function renderMyNoteCard(note, replies) {
