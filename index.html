@@ -479,6 +479,38 @@
       overflow-wrap: anywhere;
     }
 
+    .note-card-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .danger-button {
+      min-height: 40px;
+      border: 0;
+      border-radius: 8px;
+      padding: 0 14px;
+      background: #3b3028;
+      color: white;
+      font-weight: 700;
+    }
+
+    .image-preview,
+    .picked-image {
+      width: 100%;
+      max-height: 260px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid #efdcc1;
+      background: #fffefb;
+    }
+
+    .image-input-row {
+      display: grid;
+      gap: 8px;
+    }
+
     .result-row {
       width: 100%;
       min-height: 44px;
@@ -544,6 +576,11 @@
       </header>
       <form id="throwForm" class="throw-form">
         <textarea id="noteInput" maxlength="140" rows="5" placeholder="把想留下的話寫成一張紙條"></textarea>
+        <div class="image-input-row">
+          <input id="imageInput" type="file" accept="image/*" />
+          <img id="imagePreview" class="image-preview" alt="圖片預覽" hidden />
+          <span class="muted">可只寫文字，也可選一張圖片一起丟出去。</span>
+        </div>
         <div class="sheet-row">
           <span id="countText" class="muted">140 字</span>
           <button id="submitNoteButton" class="primary-button" type="submit" disabled>丟出去</button>
@@ -664,11 +701,13 @@
       const appModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-app.js");
       const authModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-auth.js");
       const firestoreModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-firestore.js");
+      const storageModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-storage.js");
 
       const app = appModule.initializeApp(firebaseConfig);
       auth = authModule.getAuth(app);
       db = firestoreModule.getFirestore(app);
-      firebaseApi = { authModule, firestoreModule };
+      const storage = storageModule.getStorage(app);
+      firebaseApi = { authModule, firestoreModule, storageModule, storage };
 
       await authModule.signInAnonymously(auth);
       currentUserId = auth.currentUser.uid;
@@ -693,6 +732,8 @@
       pickSheet: document.querySelector("#pickSheet"),
       citySheet: document.querySelector("#citySheet"),
       noteInput: document.querySelector("#noteInput"),
+      imageInput: document.querySelector("#imageInput"),
+      imagePreview: document.querySelector("#imagePreview"),
       countText: document.querySelector("#countText"),
       submitNoteButton: document.querySelector("#submitNoteButton"),
       throwForm: document.querySelector("#throwForm"),
@@ -766,19 +807,34 @@
     els.noteInput.addEventListener("input", () => {
       const left = 140 - els.noteInput.value.length;
       els.countText.textContent = `${left} 字`;
-      els.submitNoteButton.disabled = els.noteInput.value.trim().length === 0;
+      updateThrowButton();
+    });
+
+    els.imageInput.addEventListener("change", () => {
+      const file = els.imageInput.files?.[0];
+      if (!file) {
+        els.imagePreview.hidden = true;
+        els.imagePreview.removeAttribute("src");
+        updateThrowButton();
+        return;
+      }
+      els.imagePreview.src = URL.createObjectURL(file);
+      els.imagePreview.hidden = false;
+      updateThrowButton();
     });
 
     els.throwForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const content = els.noteInput.value.trim().slice(0, 140);
-      if (!content) return;
+      const imageFile = els.imageInput.files?.[0] || null;
+      if (!content && !imageFile) return;
 
       const note = {
         id: crypto.randomUUID(),
         authorUid: currentUserId,
-        type: "text",
+        type: imageFile ? "image" : "text",
         content,
+        imageUrl: "",
         location: { ...currentLocation },
         city: currentCity,
         createdAt: new Date().toISOString(),
@@ -789,10 +845,17 @@
       };
 
       try {
+        if (imageFile) {
+          note.imageUrl = await uploadNoteImage(imageFile);
+          if (!note.content) note.content = "圖片紙條";
+        }
         await saveNote(note);
         notes.unshift(note);
         saveDemoNotes();
         els.noteInput.value = "";
+        els.imageInput.value = "";
+        els.imagePreview.hidden = true;
+        els.imagePreview.removeAttribute("src");
         els.countText.textContent = "140 字";
         els.submitNoteButton.disabled = true;
         closeSheets();
@@ -800,7 +863,7 @@
         showToast("紙條已丟出去");
       } catch (error) {
         console.error(error);
-        showToast("Firebase 寫入失敗，請檢查 Authentication 和 Firestore");
+        showToast("寫入失敗，請檢查 Firestore / Storage");
       }
     });
 
@@ -831,6 +894,12 @@
         els.cityResults.appendChild(button);
       });
     });
+
+    function updateThrowButton() {
+      const hasText = els.noteInput.value.trim().length > 0;
+      const hasImage = Boolean(els.imageInput.files?.[0]);
+      els.submitNoteButton.disabled = !hasText && !hasImage;
+    }
 
     await refreshNotes();
     locateMe();
@@ -894,7 +963,7 @@
       }
 
       const nearbyCount = notes.filter((note) => distanceMeters(currentLocation, note.location) <= 300).length;
-      if (nearbyCount === 0) {
+      if (!hasFirebase && nearbyCount === 0) {
         notes = [...seedNotes(currentLocation, currentCity), ...notes];
       }
 
@@ -906,7 +975,7 @@
 
       notes.forEach((note) => {
         const marker = L.marker([note.location.lat, note.location.lng], {
-          title: note.content,
+          title: note.content || "圖片紙條",
           icon: L.divIcon({
             className: "",
             html: '<div class="paper-marker"></div>',
@@ -951,13 +1020,27 @@
       await updatePickedCount(note);
       saveDemoNotes();
 
-      els.pickedContent.textContent = note.content;
+      renderPickedNote(note);
       els.pickedCity.textContent = note.city;
       els.pickedCount.textContent = `${note.pickedCount} 次`;
       els.pickedTime.textContent = new Date(note.createdAt).toLocaleString("zh-TW");
       selectedReplies = await loadReplies(note);
       renderReplies();
       openSheet("pick");
+    }
+
+    function renderPickedNote(note) {
+      els.pickedContent.innerHTML = "";
+      if (note.imageUrl) {
+        const img = document.createElement("img");
+        img.className = "picked-image";
+        img.src = note.imageUrl;
+        img.alt = note.content || "圖片紙條";
+        els.pickedContent.appendChild(img);
+      }
+      const text = document.createElement("span");
+      text.textContent = note.content || "圖片紙條";
+      els.pickedContent.appendChild(text);
     }
 
     async function submitReply(reply) {
@@ -1004,23 +1087,76 @@
       });
     }
 
-    function showMyNotes() {
+    async function showMyNotes() {
       const mine = notes.filter((note) => note.authorUid === currentUserId);
       els.myNotesList.innerHTML = "";
 
       if (mine.length === 0) {
         els.myNotesList.innerHTML = '<p class="muted">目前還沒有丟出的紙條。</p>';
       } else {
-        mine.forEach((note) => {
+        for (const note of mine) {
+          const replies = await loadReplies(note);
           const card = document.createElement("article");
           card.className = "note-card";
-          card.innerHTML = `
-            <p></p>
-            <span class="muted">${escapeHtml(note.city)} · 被撿起 ${note.pickedCount} 次</span>
-          `;
-          card.querySelector("p").textContent = note.content;
+          const body = document.createElement("div");
+          if (note.imageUrl) {
+            const img = document.createElement("img");
+            img.className = "picked-image";
+            img.src = note.imageUrl;
+            img.alt = note.content || "圖片紙條";
+            body.appendChild(img);
+          }
+          const p = document.createElement("p");
+          p.textContent = note.content || "圖片紙條";
+          body.appendChild(p);
+          const meta = document.createElement("span");
+          meta.className = "muted";
+          meta.textContent = `${note.city} · 被撿起 ${note.pickedCount} 次 · 回覆 ${replies.length} 則`;
+          body.appendChild(meta);
+
+          const replyBox = document.createElement("div");
+          replyBox.className = "reply-list";
+          replyBox.style.marginTop = "12px";
+          if (!replies.length) {
+            replyBox.innerHTML = '<p class="muted">還沒有回覆。</p>';
+          } else {
+            replies.forEach((reply) => {
+              const replyCard = document.createElement("article");
+              replyCard.className = "reply-card";
+              const replyText = document.createElement("p");
+              replyText.textContent = reply.content;
+              const replyTime = document.createElement("small");
+              replyTime.textContent = new Date(reply.createdAt).toLocaleString("zh-TW");
+              replyCard.append(replyText, replyTime);
+              replyBox.appendChild(replyCard);
+            });
+          }
+
+          const actions = document.createElement("div");
+          actions.className = "note-card-actions";
+          const openButton = document.createElement("button");
+          openButton.className = "secondary-button";
+          openButton.type = "button";
+          openButton.textContent = "打開紙條";
+          openButton.addEventListener("click", () => {
+            els.myNotesPage.classList.remove("open");
+            pickNote(note);
+          });
+          const deleteButton = document.createElement("button");
+          deleteButton.className = "danger-button";
+          deleteButton.type = "button";
+          deleteButton.textContent = "撿回刪除";
+          deleteButton.addEventListener("click", async () => {
+            if (!confirm("確定要撿回並刪除這張紙條嗎？")) return;
+            await deleteMyNote(note);
+            showToast("紙條已刪除");
+            await refreshNotes();
+            showMyNotes();
+          });
+          actions.append(openButton, deleteButton);
+          card.append(body, replyBox, actions);
           els.myNotesList.appendChild(card);
-        });
+        }
       }
 
       els.myNotesPage.classList.add("open");
@@ -1053,6 +1189,7 @@
           authorUid: "seed",
           type: "text",
           content: "第一張測試紙條：今天也把話輕輕放在路邊。",
+          imageUrl: "",
           location: { lat: center.lat + 0.002, lng: center.lng + 0.0015 },
           city,
           createdAt: now,
@@ -1066,6 +1203,7 @@
           authorUid: "seed",
           type: "text",
           content: "路過的人你好，願你今天剛好遇到一件小好事。",
+          imageUrl: "",
           location: { lat: center.lat - 0.0012, lng: center.lng - 0.001 },
           city,
           createdAt: now,
@@ -1090,8 +1228,9 @@
       const expiresAt = addDays(new Date(), 30);
       const docRef = await addDoc(collection(db, "notes"), {
         authorUid: currentUserId,
-        type: "text",
+        type: note.type,
         content: note.content,
+        imageUrl: note.imageUrl || "",
         location: new GeoPoint(note.location.lat, note.location.lng),
         city: note.city,
         geohash: `${note.location.lat.toFixed(3)},${note.location.lng.toFixed(3)}`,
@@ -1103,6 +1242,37 @@
         lastDriftAt: serverTimestamp()
       });
       note.id = docRef.id;
+    }
+
+    async function uploadNoteImage(file) {
+      if (!hasFirebase) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+      }
+
+      const { getDownloadURL, ref, uploadBytes } = firebaseApi.storageModule;
+      const safeName = file.name.replace(/[^\w.-]/g, "_");
+      const fileRef = ref(firebaseApi.storage, `images/${currentUserId}/${Date.now()}-${safeName}`);
+      await uploadBytes(fileRef, file, { contentType: file.type || "image/jpeg" });
+      return getDownloadURL(fileRef);
+    }
+
+    async function deleteMyNote(note) {
+      notes = notes.filter((item) => item.id !== note.id);
+      saveDemoNotes();
+
+      if (!hasFirebase || note.id.startsWith("seed-")) return;
+      if (note.authorUid !== currentUserId) {
+        showToast("只能刪除自己的紙條");
+        return;
+      }
+
+      const { deleteDoc, doc } = firebaseApi.firestoreModule;
+      await deleteDoc(doc(db, "notes", note.id));
     }
 
     async function saveReply(note, reply) {
@@ -1193,6 +1363,7 @@
           authorUid: data.authorUid,
           type: data.type,
           content: data.content,
+          imageUrl: data.imageUrl || "",
           location: {
             lat: data.location.latitude,
             lng: data.location.longitude
