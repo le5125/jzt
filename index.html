@@ -360,10 +360,10 @@
     }
     .side-button.locating svg { stroke: var(--paper); }
 
-    /* ========== 底部三欄 ========== */
+    /* ========== 底部三欄（固定最下層 UI，抽屜 z-index 較高會蓋住） ========== */
     .bottom-bar {
       position: absolute;
-      z-index: 850;
+      z-index: 800;
       left: 0;
       right: 0;
       bottom: 0;
@@ -373,14 +373,6 @@
       align-items: end;
       pointer-events: none;
       background: linear-gradient(to top, rgba(251, 238, 212, 0.96) 30%, rgba(251, 238, 212, 0) 100%);
-      transition: opacity 0.25s ease, visibility 0.25s;
-    }
-
-    /* 任一抽屜開啟時，底部三欄隱藏，避免擋住內容 */
-    body.sheet-open .bottom-bar {
-      opacity: 0;
-      visibility: hidden;
-      pointer-events: none;
     }
 
     .bottom-tab {
@@ -2072,7 +2064,7 @@
         dismissSplash();
 
         syncPickedNotesFromFirebase().catch((err) => console.warn("[背景] 撿記錄同步失敗", err));
-        locateMe({ refreshAfter: false }).catch((err) => console.warn("[背景] 定位失敗", err));
+        locateMe().catch((err) => console.warn("[背景] 定位失敗", err));
       }
 
       finishBootRef = finishBoot;
@@ -2132,6 +2124,12 @@
     map.setView([currentLocation.lat, currentLocation.lng], 15);
     els.cityText.textContent = currentCity;
 
+    // 重新整理時先顯示快取紙條，Firebase 載完再更新
+    loadPickedNotesLocal();
+    if (hasFirebase && applyNotesCache()) {
+      renderNotes();
+    }
+
     revealApp();
 
     window.addEventListener("resize", () => fixMapSize("resize"));
@@ -2150,10 +2148,7 @@
       showToast("已重新整理");
     });
     els.openThrowButton.addEventListener("click", () => openSheet("throw"));
-    els.myNotesButton.addEventListener("click", () => {
-      if (els.myNotesPage.classList.contains("open")) return;
-      showMyNotes({ repliesOnly: false });
-    });
+    els.myNotesButton.addEventListener("click", () => showMyNotes({ repliesOnly: false }));
     els.replyAlert.addEventListener("click", () => showMyNotes({ repliesOnly: true }));
     els.nearbyListButton.addEventListener("click", showNearbyList);
     els.nearbyAlert.addEventListener("click", pickNearestNote);
@@ -2409,7 +2404,7 @@
           map.setView([result.center.lat, result.center.lng], 15);
           userMarker.setLatLng([result.center.lat, result.center.lng]);
           closeSheets();
-          await refreshNotes();
+          renderNotes();
         });
         els.cityResults.appendChild(button);
       });
@@ -2440,13 +2435,6 @@
 
     let myNotesLoadToken = 0;
 
-    function syncSheetOpenClass() {
-      document.body.classList.toggle(
-        "sheet-open",
-        Boolean(document.querySelector(".sheet.open"))
-      );
-    }
-
     function closeSheets(except) {
       const keep = typeof except === "string" ? except : null;
       if (keep !== "throw") els.throwSheet.classList.remove("open");
@@ -2454,7 +2442,6 @@
       if (keep !== "city") els.citySheet.classList.remove("open");
       if (keep !== "nearby") els.nearbySheet.classList.remove("open");
       if (keep !== "myNotes") els.myNotesPage.classList.remove("open");
-      syncSheetOpenClass();
     }
 
     function openSheet(name) {
@@ -2464,7 +2451,6 @@
       if (name === "city") els.citySheet.classList.add("open");
       if (name === "nearby") els.nearbySheet.classList.add("open");
       if (name === "myNotes") els.myNotesPage.classList.add("open");
-      syncSheetOpenClass();
     }
 
     /*
@@ -2579,7 +2565,6 @@
     }
 
     function locateMe(options = {}) {
-      const { refreshAfter = true } = options;
       els.locateText.textContent = "定位中";
       els.locateButton.classList.add("locating");
 
@@ -2588,11 +2573,8 @@
           try {
             els.cityText.textContent = currentCity;
             saveLastLocation();
-            if (refreshAfter) {
-              await refreshNotes();
-            } else {
-              renderNotes();
-            }
+            // 紙條是全台顯示，定位只需重畫地圖與附近提示，不必重抓 Firebase
+            renderNotes();
           } finally {
             els.locateText.textContent = "重新定位";
             els.locateButton.classList.remove("locating");
@@ -2628,19 +2610,30 @@
 
     async function refreshNotes(options = {}) {
       const { background = false } = options;
+      const backup = notes.length ? notes.map((note) => ({ ...note })) : null;
       els.cityText.textContent = currentCity;
 
       try {
         if (hasFirebase) {
-          notes = await loadFirebaseNotes();
-          saveNotesCache();
+          const loaded = await loadFirebaseNotes();
+          if (loaded.length > 0) {
+            notes = loaded;
+            saveNotesCache();
+          } else if (backup?.length) {
+            notes = backup;
+            console.warn(`[紙條] Firebase 回傳空，保留原本 ${backup.length} 張`);
+          } else if (!applyNotesCache()) {
+            notes = [];
+          }
         } else {
           notes = loadDemoNotes();
         }
       } catch (error) {
         console.error(error);
-        if (background && !notes.length) {
-          applyNotesCache();
+        if (backup?.length) {
+          notes = backup;
+        } else if (!applyNotesCache()) {
+          notes = [];
         }
         if (!background && !notes.length) {
           showToast("Firebase 讀取失敗，先顯示測試紙條");
@@ -2974,9 +2967,9 @@
       });
     }
 
-    function loadNotesCache() {
+    function loadNotesCacheFrom(key) {
       try {
-        const raw = localStorage.getItem(notesCacheKey());
+        const raw = localStorage.getItem(key);
         if (!raw) return null;
         const parsed = JSON.parse(raw);
         if (!parsed?.notes?.length) return null;
@@ -2987,13 +2980,19 @@
       }
     }
 
+    function loadNotesCache() {
+      return loadNotesCacheFrom(notesCacheKey()) || loadNotesCacheFrom("jzt_notes_cache_all");
+    }
+
     function saveNotesCache() {
       if (!hasFirebase || !notes.length) return;
       try {
-        localStorage.setItem(notesCacheKey(), JSON.stringify({
+        const payload = JSON.stringify({
           savedAt: Date.now(),
           notes: notesForCache(notes)
-        }));
+        });
+        localStorage.setItem(notesCacheKey(), payload);
+        localStorage.setItem("jzt_notes_cache_all", payload);
       } catch (err) {
         console.warn("[快取] 紙條快取寫入失敗", err);
       }
@@ -3328,8 +3327,18 @@
                 limit(MAP_NOTE_LIMIT)
               )
             );
+            if (snapshot.empty) {
+              console.warn("[紙條] lastActivityAt 查無資料，改用 createdAt");
+              snapshot = await getDocs(
+                query(
+                  collection(db, "notes"),
+                  orderBy("createdAt", "desc"),
+                  limit(MAP_NOTE_LIMIT)
+                )
+              );
+            }
           } catch (err) {
-            console.warn("[紙條] lastActivityAt 索引尚未建立，改用 createdAt", err);
+            console.warn("[紙條] lastActivityAt 查詢失敗，改用 createdAt", err);
             snapshot = await getDocs(
               query(
                 collection(db, "notes"),
