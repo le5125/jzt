@@ -2380,12 +2380,14 @@
     async function pickNote(note) {
       selectedNote = note;
 
-      // 自己撿自己的紙條不算次數
+      // 自己撿自己的紙條不算次數；同一位作者也只算第一次
       const isOwn = note.authorUid === currentUserId;
-      if (!isOwn) {
+      const alreadyPickedAuthor = hasPickedAuthorBefore(note.authorUid);
+      if (!isOwn && !alreadyPickedAuthor && note.authorUid !== "seed") {
         note.pickedCount += 1;
         await updatePickedCount(note);
         saveDemoNotes();
+        markAuthorAsPicked(note.authorUid);
       }
 
       renderPickedNote(note);
@@ -2953,6 +2955,28 @@
       const ani = NICKNAME_ANIMALS[Math.floor(h / NICKNAME_ADJECTIVES.length) % NICKNAME_ANIMALS.length];
       const num = (h % 9000) + 1000;  // 1000~9999 編號
       return `${adj}${ani} #${num}`;
+    }
+
+    /*
+      ============= 撿紙條計次 =============
+      同一位作者只算一次：你已經撿過這個人的紙條，再撿他的其他張或同一張都不再加次數
+    */
+    function getPickedAuthorUids() {
+      try {
+        return new Set(JSON.parse(localStorage.getItem("jzt_picked_authors") || "[]"));
+      } catch {
+        return new Set();
+      }
+    }
+
+    function hasPickedAuthorBefore(authorUid) {
+      return getPickedAuthorUids().has(authorUid);
+    }
+
+    function markAuthorAsPicked(authorUid) {
+      const set = getPickedAuthorUids();
+      set.add(authorUid);
+      localStorage.setItem("jzt_picked_authors", JSON.stringify([...set]));
     }
 
     /*
