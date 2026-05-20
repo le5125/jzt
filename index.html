@@ -312,6 +312,7 @@
 
     .throw-form,
     .picked-note,
+    .reply-form,
     .city-search {
       display: grid;
       gap: 14px;
@@ -332,6 +333,60 @@
       white-space: pre-wrap;
       overflow-wrap: anywhere;
     }
+
+    .reply-panel {
+      display: grid;
+      gap: 12px;
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+    }
+
+    .reply-list {
+      display: grid;
+      gap: 10px;
+      max-height: 190px;
+      overflow: auto;
+    }
+
+    .reply-card {
+      display: grid;
+      gap: 6px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #fffefb;
+      border: 1px solid #efdcc1;
+    }
+
+    .reply-card p {
+      margin: 0;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .reply-card audio {
+      width: 100%;
+    }
+
+    .reply-card small {
+      color: var(--muted);
+    }
+
+    .sticker-row {
+      display: grid;
+      grid-template-columns: repeat(5, 44px);
+      gap: 8px;
+    }
+
+    .sticker-button {
+      width: 44px;
+      height: 44px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fffefb;
+      font-size: 24px;
+    }
+
 
     .note-meta {
       display: grid;
@@ -517,7 +572,31 @@
             <dd id="pickedTime">-</dd>
           </div>
         </dl>
-        <button class="secondary-button" type="button" disabled>回覆功能下一版接上</button>
+        <section class="reply-panel" aria-label="回覆">
+          <h3>回覆</h3>
+          <div id="replyList" class="reply-list">
+            <p class="muted">還沒有回覆。</p>
+          </div>
+
+          <form id="replyForm" class="reply-form">
+            <textarea id="replyInput" maxlength="140" rows="3" placeholder="寫一則回覆"></textarea>
+            <div class="sheet-row">
+              <span id="replyCountText" class="muted">140 字</span>
+              <button id="submitReplyButton" class="primary-button" type="submit" disabled>送出回覆</button>
+            </div>
+          </form>
+
+          <div>
+            <p class="muted">貼圖回覆</p>
+            <div id="stickerRow" class="sticker-row">
+              <button class="sticker-button" type="button" data-sticker="👍">👍</button>
+              <button class="sticker-button" type="button" data-sticker="❤️">❤️</button>
+              <button class="sticker-button" type="button" data-sticker="😂">😂</button>
+              <button class="sticker-button" type="button" data-sticker="🥹">🥹</button>
+              <button class="sticker-button" type="button" data-sticker="🌟">🌟</button>
+            </div>
+          </div>
+        </section>
       </article>
     </section>
 
@@ -600,6 +679,7 @@
     let currentCity = "台北";
     let notes = loadDemoNotes();
     let selectedNote = null;
+    let selectedReplies = [];
     let markersLayer = null;
     let userMarker = null;
 
@@ -620,6 +700,12 @@
       pickedCity: document.querySelector("#pickedCity"),
       pickedCount: document.querySelector("#pickedCount"),
       pickedTime: document.querySelector("#pickedTime"),
+      replyList: document.querySelector("#replyList"),
+      replyForm: document.querySelector("#replyForm"),
+      replyInput: document.querySelector("#replyInput"),
+      replyCountText: document.querySelector("#replyCountText"),
+      submitReplyButton: document.querySelector("#submitReplyButton"),
+      stickerRow: document.querySelector("#stickerRow"),
       nearbyAlert: document.querySelector("#nearbyAlert"),
       myNotesButton: document.querySelector("#myNotesButton"),
       myNotesPage: document.querySelector("#myNotesPage"),
@@ -654,6 +740,25 @@
     els.myNotesButton.addEventListener("click", showMyNotes);
     els.backButton.addEventListener("click", () => els.myNotesPage.classList.remove("open"));
     els.nearbyAlert.addEventListener("click", pickNearestNote);
+    els.replyInput.addEventListener("input", () => {
+      const left = 140 - els.replyInput.value.length;
+      els.replyCountText.textContent = `${left} 字`;
+      els.submitReplyButton.disabled = els.replyInput.value.trim().length === 0;
+    });
+    els.replyForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const content = els.replyInput.value.trim().slice(0, 140);
+      if (!content || !selectedNote) return;
+      await submitReply({ type: "text", content });
+      els.replyInput.value = "";
+      els.replyCountText.textContent = "140 字";
+      els.submitReplyButton.disabled = true;
+    });
+    els.stickerRow.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-sticker]");
+      if (!button || !selectedNote) return;
+      await submitReply({ type: "sticker", content: button.dataset.sticker });
+    });
     document.querySelectorAll("[data-close]").forEach((button) => {
       button.addEventListener("click", closeSheets);
     });
@@ -788,8 +893,9 @@
         notes = loadDemoNotes();
       }
 
-      if (notes.length < 2) {
-        notes = [...notes, ...seedNotes(currentLocation, currentCity)];
+      const nearbyCount = notes.filter((note) => distanceMeters(currentLocation, note.location) <= 300).length;
+      if (nearbyCount === 0) {
+        notes = [...seedNotes(currentLocation, currentCity), ...notes];
       }
 
       renderNotes();
@@ -813,7 +919,7 @@
         marker.addTo(markersLayer);
       });
 
-      const nearby = notes.filter((note) => distanceMeters(currentLocation, note.location) <= 50);
+      const nearby = notes.filter((note) => distanceMeters(currentLocation, note.location) <= 300);
       if (nearby.length > 0) {
         els.nearbyAlert.textContent = `附近有 ${nearby.length} 張紙條，點我撿起`;
         els.nearbyAlert.classList.add("show");
@@ -828,11 +934,11 @@
           note,
           distance: distanceMeters(currentLocation, note.location)
         }))
-        .filter((item) => item.distance <= 50)
+        .filter((item) => item.distance <= 300)
         .sort((a, b) => a.distance - b.distance)[0];
 
       if (!nearest) {
-        showToast("50 公尺內暫時沒有紙條");
+        showToast("附近暫時沒有紙條");
         return;
       }
 
@@ -849,7 +955,53 @@
       els.pickedCity.textContent = note.city;
       els.pickedCount.textContent = `${note.pickedCount} 次`;
       els.pickedTime.textContent = new Date(note.createdAt).toLocaleString("zh-TW");
+      selectedReplies = await loadReplies(note);
+      renderReplies();
       openSheet("pick");
+    }
+
+    async function submitReply(reply) {
+      if (!selectedNote) return;
+      const newReply = {
+        id: crypto.randomUUID(),
+        authorUid: currentUserId,
+        type: reply.type,
+        content: reply.content,
+        createdAt: new Date().toISOString()
+      };
+
+      try {
+        await saveReply(selectedNote, newReply);
+        selectedReplies.unshift(newReply);
+        selectedNote.replyCount = (selectedNote.replyCount || 0) + 1;
+        els.pickedCount.textContent = `${selectedNote.pickedCount} 次`;
+        renderReplies();
+        showToast("已送出回覆");
+      } catch (error) {
+        console.error(error);
+        showToast("回覆失敗，請檢查 Firebase 規則");
+      }
+    }
+
+    function renderReplies() {
+      els.replyList.innerHTML = "";
+      if (!selectedReplies.length) {
+        els.replyList.innerHTML = '<p class="muted">還沒有回覆。</p>';
+        return;
+      }
+
+      selectedReplies.forEach((reply) => {
+        const card = document.createElement("article");
+        card.className = "reply-card";
+
+        const text = document.createElement("p");
+        text.textContent = reply.content;
+        const time = document.createElement("small");
+        time.textContent = new Date(reply.createdAt).toLocaleString("zh-TW");
+        card.append(text, time);
+
+        els.replyList.appendChild(card);
+      });
     }
 
     function showMyNotes() {
@@ -953,23 +1105,84 @@
       note.id = docRef.id;
     }
 
+    async function saveReply(note, reply) {
+      if (!hasFirebase || note.id.startsWith("seed-")) {
+        const key = `jzt_replies_${note.id}`;
+        const saved = JSON.parse(localStorage.getItem(key) || "[]");
+        saved.unshift(reply);
+        localStorage.setItem(key, JSON.stringify(saved));
+        return;
+      }
+
+      const {
+        addDoc,
+        collection,
+        doc,
+        increment,
+        serverTimestamp,
+        updateDoc
+      } = firebaseApi.firestoreModule;
+
+      await addDoc(collection(db, "notes", note.id, "replies"), {
+        authorUid: currentUserId,
+        type: reply.type,
+        content: reply.content,
+        createdAt: serverTimestamp()
+      });
+
+      await updateDoc(doc(db, "notes", note.id), {
+        replyCount: increment(1)
+      });
+    }
+
+    async function loadReplies(note) {
+      if (!hasFirebase || note.id.startsWith("seed-")) {
+        const key = `jzt_replies_${note.id}`;
+        return JSON.parse(localStorage.getItem(key) || "[]");
+      }
+
+      const {
+        collection,
+        getDocs,
+        limit,
+        orderBy,
+        query
+      } = firebaseApi.firestoreModule;
+
+      const snapshot = await getDocs(
+        query(
+          collection(db, "notes", note.id, "replies"),
+          orderBy("createdAt", "desc"),
+          limit(30)
+        )
+      );
+
+      return snapshot.docs.map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          authorUid: data.authorUid,
+          type: data.type,
+          content: data.content,
+          createdAt: data.createdAt?.toDate?.().toISOString() || new Date().toISOString()
+        };
+      });
+    }
+
     async function loadFirebaseNotes() {
       const {
         collection,
         getDocs,
         limit,
         orderBy,
-        query,
-        Timestamp,
-        where
+        query
       } = firebaseApi.firestoreModule;
 
       const snapshot = await getDocs(
         query(
           collection(db, "notes"),
-          where("expiresAt", ">", Timestamp.now()),
-          orderBy("expiresAt", "asc"),
-          limit(50)
+          orderBy("createdAt", "desc"),
+          limit(100)
         )
       );
 
