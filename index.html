@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#fbeed4" />
-  <title>丟紙條 · 法式繪本</title>
+  <title>丟紙條</title>
 
   <!-- 法式繪本字體：Caveat（手寫流暢）+ Patrick Hand（手寫工整）+ 思源中文 -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -1540,6 +1540,7 @@
     let selectedNote = null;
     let selectedReplies = [];
     let currentFilter = "all";
+    const NEARBY_RADIUS_METERS = 1000;
     let markersLayer = null;
     let userMarker = null;
 
@@ -1941,39 +1942,7 @@
       els.submitNoteButton.disabled = !hasText && !hasImage;
     }
 
-    await refreshNotes();
     locateMe();
-
-    /*
-      === 自動背景更新 ===
-      每 30 秒撈一次最新紙條，讓使用者不用手動按重新整理
-      條件：
-       - 沒有任何抽屜開著（避免使用者寫字寫到一半畫面跳動）
-       - 分頁是可見的（背景頁面不浪費 Firebase 額度）
-       - 使用者也沒在我的紙條頁
-    */
-    const AUTO_REFRESH_MS = 30000;
-    setInterval(async () => {
-      // 抽屜開著、或在我的紙條頁時不更新
-      const anySheetOpen = document.querySelector(".sheet.open");
-      const onMyNotes = els.myNotesPage.classList.contains("open");
-      if (anySheetOpen || onMyNotes) return;
-      if (document.hidden) return;
-
-      try {
-        await refreshNotes();
-        console.log("[自動更新] 紙條已同步");
-      } catch (err) {
-        console.warn("[自動更新] 失敗，下次再試", err);
-      }
-    }, AUTO_REFRESH_MS);
-
-    // 分頁從背景切回前景時，立刻刷新一次
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) {
-        refreshNotes().catch((err) => console.warn("[切回前景刷新失敗]", err));
-      }
-    });
 
     function openSheet(name) {
       closeSheets();
@@ -2065,6 +2034,7 @@
     function showNearbyList() {
       const sorted = notes
         .map((note) => ({ note, distance: distanceMeters(currentLocation, note.location) }))
+        .filter((item) => item.distance <= NEARBY_RADIUS_METERS)
         .sort((a, b) => a.distance - b.distance)
         .slice(0, 30);
 
@@ -2157,7 +2127,7 @@
         notes = loadDemoNotes();
       }
 
-      const nearbyCount = notes.filter((note) => distanceMeters(currentLocation, note.location) <= 300).length;
+      const nearbyCount = notes.filter((note) => distanceMeters(currentLocation, note.location) <= NEARBY_RADIUS_METERS).length;
       if (!hasFirebase && nearbyCount === 0) {
         notes = [...seedNotes(currentLocation, currentCity), ...notes];
       }
@@ -2169,7 +2139,10 @@
       markersLayer.clearLayers();
 
       // 套用使用者選的篩選器
-      const visibleNotes = applyFilter(notes);
+      const visibleNotes = applyFilter(notes).filter((note) =>
+        distanceMeters(currentLocation, note.location) <= NEARBY_RADIUS_METERS ||
+        note.authorUid === currentUserId
+      );
 
       visibleNotes.forEach((note) => {
         const isMine = note.authorUid === currentUserId;
@@ -2214,7 +2187,7 @@
 
       const nearby = visibleNotes.filter((note) =>
         note.authorUid !== currentUserId &&
-        distanceMeters(currentLocation, note.location) <= 300
+        distanceMeters(currentLocation, note.location) <= NEARBY_RADIUS_METERS
       );
       if (nearby.length > 0) {
         els.nearbyAlert.textContent = `附近有 ${nearby.length} 張紙條，點我撿起`;
@@ -2231,7 +2204,7 @@
           note,
           distance: distanceMeters(currentLocation, note.location)
         }))
-        .filter((item) => item.distance <= 300)
+        .filter((item) => item.distance <= NEARBY_RADIUS_METERS)
         .sort((a, b) => a.distance - b.distance)[0];
 
       if (!nearest) {
