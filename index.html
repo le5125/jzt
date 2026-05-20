@@ -876,7 +876,7 @@
 
     .note-meta {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 10px;
       margin: 0;
       padding: 14px 6px;
@@ -1408,9 +1408,9 @@
       <form id="throwForm" class="throw-form">
         <textarea id="noteInput" maxlength="140" rows="5" placeholder="把想留下的話，輕輕寫在這張信紙上⋯"></textarea>
         <div class="image-input-row">
-          <input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp,image/*" multiple />
+          <input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp,image/*" />
           <div id="imagePreviewRow" class="image-preview-row" hidden></div>
-          <span id="imageCountText" class="muted">每張紙條最多 2 張 · 今日圖片剩 2 張</span>
+          <span id="imageCountText" class="muted">每張紙條 1 張圖 · 今日圖片剩 2 張</span>
         </div>
         <div class="sheet-row">
           <span id="countText" class="muted">140 字</span>
@@ -1450,8 +1450,12 @@
             <dd id="pickedCount">0 次</dd>
           </div>
           <div>
-            <dt>留下時間</dt>
-            <dd id="pickedTime">—</dd>
+            <dt>丟出時間</dt>
+            <dd id="pickedCreatedTime">—</dd>
+          </div>
+          <div>
+            <dt>更新時間</dt>
+            <dd id="pickedUpdatedTime">—</dd>
           </div>
         </dl>
         <section class="reply-panel" aria-label="回覆">
@@ -1559,7 +1563,8 @@
     const LIFF_ID = "2010143431-l2kcIl8v";
     const DAILY_LIMIT = 5;
     const DAILY_IMAGE_LIMIT = 2;
-    const MAX_IMAGES_PER_NOTE = 2;
+    const MAX_IMAGES_PER_NOTE = 1;
+    const MAP_NOTE_LIMIT = 100;
     const MIN_SPLASH_MS = 600;
 
     function delay(ms) {
@@ -1715,7 +1720,8 @@
       followButton: document.querySelector("#followButton"),
       pickedCity: document.querySelector("#pickedCity"),
       pickedCount: document.querySelector("#pickedCount"),
-      pickedTime: document.querySelector("#pickedTime"),
+      pickedCreatedTime: document.querySelector("#pickedCreatedTime"),
+      pickedUpdatedTime: document.querySelector("#pickedUpdatedTime"),
       replyList: document.querySelector("#replyList"),
       replyForm: document.querySelector("#replyForm"),
       replyInput: document.querySelector("#replyInput"),
@@ -1899,10 +1905,42 @@
 
     function getNoteImageUrls(note) {
       if (Array.isArray(note.imageUrls) && note.imageUrls.length) {
-        return note.imageUrls.filter(Boolean);
+        return note.imageUrls.filter(Boolean).slice(0, MAX_IMAGES_PER_NOTE);
       }
       if (note.imageUrl) return [note.imageUrl];
       return [];
+    }
+
+    function getNoteActivityTime(note) {
+      return note.lastActivityAt || note.createdAt;
+    }
+
+    function formatNoteTime(iso) {
+      if (!iso) return "—";
+      return new Date(iso).toLocaleString("zh-TW", {
+        month: "numeric",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+    }
+
+    function formatNoteTimesMeta(note) {
+      const created = formatNoteTime(note.createdAt);
+      const updated = formatNoteTime(getNoteActivityTime(note));
+      if (created === updated) return `丟出 ${created}`;
+      return `丟出 ${created} · 更新 ${updated}`;
+    }
+
+    function updatePickedTimes(note) {
+      els.pickedCreatedTime.textContent = formatNoteTime(note.createdAt);
+      els.pickedUpdatedTime.textContent = formatNoteTime(getNoteActivityTime(note));
+    }
+
+    function sortNotesByActivity(noteList) {
+      return [...noteList]
+        .sort((a, b) => new Date(getNoteActivityTime(b)) - new Date(getNoteActivityTime(a)))
+        .slice(0, MAP_NOTE_LIMIT);
     }
 
     function noteHasImage(note) {
@@ -1956,7 +1994,7 @@
       els.throwRemainingText.textContent = `今日剩 ${throwRemaining} 次`;
       if (els.imageCountText) {
         els.imageCountText.textContent =
-          `每張最多 ${MAX_IMAGES_PER_NOTE} 張 · 今日圖片剩 ${imageRemaining} 張`;
+          `每張紙條 1 張圖 · 今日圖片剩 ${imageRemaining} 張`;
       }
       els.openThrowButton.setAttribute(
         "aria-label",
@@ -2191,8 +2229,8 @@
     }
 
     els.imageInput.addEventListener("change", () => {
-      const files = [...(els.imageInput.files || [])];
-      if (!files.length) {
+      const file = (els.imageInput.files || [])[0];
+      if (!file) {
         clearThrowImages();
         updateThrowButton();
         updateThrowRemainingLabel();
@@ -2201,20 +2239,15 @@
 
       const usage = getDailyUsage();
       const imageRemaining = DAILY_IMAGE_LIMIT - usage.imageCount;
-      const allowed = Math.min(MAX_IMAGES_PER_NOTE, Math.max(0, imageRemaining));
 
-      if (allowed <= 0) {
+      if (imageRemaining <= 0) {
         showToast(`今天圖片額度已用完（${DAILY_IMAGE_LIMIT} 張）`);
         clearThrowImages();
         updateThrowButton();
         return;
       }
 
-      if (files.length > allowed) {
-        showToast(`最多選 ${allowed} 張（每張紙條 ${MAX_IMAGES_PER_NOTE} 張 · 今日剩 ${imageRemaining} 張）`);
-      }
-
-      selectedThrowImages = files.slice(0, allowed);
+      selectedThrowImages = [file];
       renderImagePreviews();
       updateThrowButton();
       updateThrowRemainingLabel();
@@ -2223,8 +2256,8 @@
     els.throwForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const content = els.noteInput.value.trim().slice(0, 140);
-      const imageFiles = [...selectedThrowImages];
-      if (!content && !imageFiles.length) return;
+      const imageFile = selectedThrowImages[0] || null;
+      if (!content && !imageFile) return;
 
       const today = new Date().toISOString().slice(0, 10);
       const usage = getDailyUsage();
@@ -2234,21 +2267,23 @@
       }
 
       const imageRemaining = DAILY_IMAGE_LIMIT - usage.imageCount;
-      if (imageFiles.length > imageRemaining) {
+      if (imageFile && imageRemaining <= 0) {
         showToast(`今天圖片只剩 ${imageRemaining} 張額度`);
         return;
       }
 
+      const nowIso = new Date().toISOString();
       const note = {
         id: crypto.randomUUID(),
         authorUid: currentUserId,
-        type: imageFiles.length ? "image" : "text",
+        type: imageFile ? "image" : "text",
         content,
         imageUrl: "",
         imageUrls: [],
         location: { ...currentLocation },
         city: currentCity,
-        createdAt: new Date().toISOString(),
+        createdAt: nowIso,
+        lastActivityAt: nowIso,
         expiresAt: addDays(new Date(), 30).toISOString(),
         pickedCount: 0,
         replyCount: 0,
@@ -2258,18 +2293,15 @@
       try {
         els.submitNoteButton.disabled = true;
 
-        if (imageFiles.length) {
+        if (imageFile) {
           els.submitNoteButton.textContent = "上傳圖片…";
-          note.imageUrls = [];
-          for (const file of imageFiles) {
-            const url = await withTimeout(
-              uploadNoteImage(file),
-              25000,
-              "圖片處理逾時，請換小一點的圖或改用 JPG"
-            );
-            note.imageUrls.push(url);
-          }
-          note.imageUrl = note.imageUrls[0] || "";
+          const url = await withTimeout(
+            uploadNoteImage(imageFile),
+            25000,
+            "圖片處理逾時，請換小一點的圖或改用 JPG"
+          );
+          note.imageUrls = [url];
+          note.imageUrl = url;
           if (!note.content) note.content = "圖片紙條";
         }
 
@@ -2281,12 +2313,13 @@
         );
 
         notes.unshift(note);
+        notes = sortNotesByActivity(notes);
         if (!hasFirebase) saveDemoNotes();
 
         saveDailyUsage({
           date: today,
           throwCount: usage.throwCount + 1,
-          imageCount: usage.imageCount + imageFiles.length
+          imageCount: usage.imageCount + (imageFile ? 1 : 0)
         });
         updateThrowRemainingLabel();
 
@@ -2477,7 +2510,7 @@
           const meta = document.createElement("span");
           meta.className = "muted";
           const distText = distance < 1000 ? `${Math.round(distance)} 公尺` : `${(distance / 1000).toFixed(1)} 公里`;
-          meta.textContent = `${isMine ? "📜 我的" : "📃 " + nicknameOf(note.authorUid)} · ${note.city || "—"} · ${distText} · 被撿起 ${note.pickedCount} 次`;
+          meta.textContent = `${isMine ? "📜 我的" : "📃 " + nicknameOf(note.authorUid)} · ${note.city || "—"} · ${distText} · 被撿起 ${note.pickedCount} 次 · ${formatNoteTimesMeta(note)}`;
           card.appendChild(meta);
 
           card.addEventListener("click", () => {
@@ -2562,6 +2595,7 @@
         notes = [...seedNotes(currentLocation, currentCity), ...notes];
       }
 
+      notes = sortNotesByActivity(notes);
       renderNotes();
       updateReplyAlert();
     }
@@ -2668,7 +2702,7 @@
 
       els.pickedCity.textContent = note.city;
       els.pickedCount.textContent = `${note.pickedCount} 次`;
-      els.pickedTime.textContent = new Date(note.createdAt).toLocaleString("zh-TW");
+      updatePickedTimes(note);
       selectedReplies = await loadReplies(note);
       renderReplies();
       openSheet("pick");
@@ -2696,8 +2730,18 @@
         await saveReply(selectedNote, newReply);
         selectedReplies.unshift(newReply);
         selectedNote.replyCount = (selectedNote.replyCount || 0) + 1;
+        selectedNote.lastActivityAt = newReply.createdAt;
+        const noteIndex = notes.findIndex((item) => item.id === selectedNote.id);
+        if (noteIndex >= 0) {
+          notes[noteIndex] = { ...notes[noteIndex], ...selectedNote };
+          notes = sortNotesByActivity(notes);
+          saveNotesCache();
+        }
         els.pickedCount.textContent = `${selectedNote.pickedCount} 次`;
+        updatePickedTimes(selectedNote);
         renderReplies();
+        renderNotes();
+        updateReplyAlert();
         showToast("已送出回覆");
       } catch (error) {
         console.error(error);
@@ -2778,7 +2822,7 @@
       body.appendChild(p);
       const meta = document.createElement("span");
       meta.className = "muted";
-      meta.textContent = `${note.city} · 被撿起 ${note.pickedCount} 次 · 回覆 ${replies.length} 則`;
+      meta.textContent = `${note.city} · 被撿起 ${note.pickedCount} 次 · 回覆 ${replies.length} 則 · ${formatNoteTimesMeta(note)}`;
       body.appendChild(meta);
 
       const replyBox = document.createElement("div");
@@ -2852,7 +2896,7 @@
 
     function notesForCache(sourceNotes) {
       return sourceNotes.map((note) => {
-        const imageUrls = getNoteImageUrls(note).map(stripLargeDataUrl).filter(Boolean);
+        const imageUrls = getNoteImageUrls(note).map(stripLargeDataUrl).filter(Boolean).slice(0, MAX_IMAGES_PER_NOTE);
         return {
           ...note,
           imageUrl: imageUrls[0] || "",
@@ -2912,6 +2956,7 @@
           location: { lat: center.lat + 0.002, lng: center.lng + 0.0015 },
           city,
           createdAt: now,
+          lastActivityAt: now,
           expiresAt: addDays(new Date(), 30).toISOString(),
           pickedCount: 0,
           replyCount: 0,
@@ -2926,6 +2971,7 @@
           location: { lat: center.lat - 0.0012, lng: center.lng - 0.001 },
           city,
           createdAt: now,
+          lastActivityAt: now,
           expiresAt: addDays(new Date(), 30).toISOString(),
           pickedCount: 0,
           replyCount: 0,
@@ -2969,7 +3015,8 @@
         pickedCount: 0,
         replyCount: 0,
         isSeed: false,
-        lastDriftAt: serverTimestamp()
+        lastDriftAt: serverTimestamp(),
+        lastActivityAt: serverTimestamp()
       });
       note.id = docRef.id;
     }
@@ -3100,6 +3147,7 @@
         const saved = JSON.parse(localStorage.getItem(key) || "[]");
         saved.unshift(reply);
         localStorage.setItem(key, JSON.stringify(saved));
+        note.lastActivityAt = reply.createdAt;
         return;
       }
 
@@ -3120,7 +3168,8 @@
       });
 
       await updateDoc(doc(db, "notes", note.id), {
-        replyCount: increment(1)
+        replyCount: increment(1),
+        lastActivityAt: serverTimestamp()
       });
     }
 
@@ -3190,22 +3239,39 @@
         query
       } = firebaseApi.firestoreModule;
 
-      const [snapshot, pickCounts] = await Promise.all([
-        getDocs(
+      let snapshot;
+      try {
+        snapshot = await getDocs(
+          query(
+            collection(db, "notes"),
+            orderBy("lastActivityAt", "desc"),
+            limit(MAP_NOTE_LIMIT)
+          )
+        );
+      } catch (err) {
+        console.warn("[紙條] lastActivityAt 索引尚未建立，改用 createdAt", err);
+        snapshot = await getDocs(
           query(
             collection(db, "notes"),
             orderBy("createdAt", "desc"),
-            limit(100)
+            limit(MAP_NOTE_LIMIT)
           )
-        ),
+        );
+      }
+
+      const [pickCounts] = await Promise.all([
         loadPickCountsByNoteId()
       ]);
 
       const all = snapshot.docs.map((doc) => {
         const data = doc.data();
         const imageUrls = Array.isArray(data.imageUrls) && data.imageUrls.length
-          ? data.imageUrls.filter(Boolean)
+          ? data.imageUrls.filter(Boolean).slice(0, MAX_IMAGES_PER_NOTE)
           : (data.imageUrl ? [data.imageUrl] : []);
+        const createdAt = data.createdAt?.toDate?.().toISOString() || new Date().toISOString();
+        const lastActivityAt = data.lastActivityAt?.toDate?.().toISOString()
+          || data.lastDriftAt?.toDate?.().toISOString()
+          || createdAt;
         return {
           id: doc.id,
           authorUid: data.authorUid,
@@ -3218,7 +3284,8 @@
             lng: data.location.longitude
           },
           city: data.city,
-          createdAt: data.createdAt?.toDate?.().toISOString() || new Date().toISOString(),
+          createdAt,
+          lastActivityAt,
           expiresAt: data.expiresAt?.toDate?.().toISOString() || addDays(new Date(), 30).toISOString(),
           pickedCount: pickCounts[doc.id] ?? (data.pickedCount || 0),
           replyCount: data.replyCount || 0,
@@ -3229,9 +3296,9 @@
 
       // 過濾掉被檢舉 3 次以上的紙條
       // 例外：自己丟的還是看得到（讓使用者知道自己被檢舉了）
-      return all.filter((note) =>
+      return sortNotesByActivity(all.filter((note) =>
         note.reportCount < 3 || note.authorUid === currentUserId
-      );
+      ));
     }
 
     // === 檢舉紙條：用 array 記錄誰檢舉過，避免重複檢舉 ===
