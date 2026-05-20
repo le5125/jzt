@@ -1660,12 +1660,43 @@
       }
     }
 
+    function getRegisteredAuthorUids() {
+      try {
+        const list = JSON.parse(localStorage.getItem("jzt_author_uids") || "[]");
+        return Array.isArray(list) ? list : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function registerAuthorUid(uid) {
+      if (!uid) return;
+      const uids = new Set(getRegisteredAuthorUids());
+      uids.add(uid);
+      localStorage.setItem("jzt_author_uids", JSON.stringify([...uids]));
+    }
+
+    function getMyAuthorUids() {
+      const uids = new Set([currentUserId, ...getRegisteredAuthorUids()]);
+      const demo = localStorage.getItem("jzt_demo_uid");
+      if (demo) uids.add(demo);
+      return uids;
+    }
+
+    function isMyNote(note) {
+      return Boolean(note?.authorUid && getMyAuthorUids().has(note.authorUid));
+    }
+
     function applyAuthIdentity() {
+      const prevDemo = localStorage.getItem("jzt_demo_uid");
+      if (prevDemo) registerAuthorUid(prevDemo);
+
       if (lineProfile) {
         currentUserId = `line_${lineProfile.userId}`;
       } else if (auth?.currentUser) {
         currentUserId = auth.currentUser.uid;
       }
+      registerAuthorUid(currentUserId);
       localStorage.setItem("jzt_demo_uid", currentUserId);
       restoreLastLocation();
     }
@@ -1978,7 +2009,7 @@
     function countNewReplies() {
       const seen = getSeenReplyCounts();
       return notes
-        .filter((note) => note.authorUid === currentUserId && !note.isSeed)
+        .filter((note) => isMyNote(note) && !note.isSeed)
         .reduce((sum, note) => {
           const current = note.replyCount || 0;
           const known = seen[note.id] || 0;
@@ -2429,7 +2460,7 @@
       });
     }
 
-    let myNotesLoadToken = 0;
+    let myNotesLoading = false;
 
     function resetSheetVisual(sheet) {
       if (!sheet) return;
@@ -2525,11 +2556,11 @@
     function applyFilter(noteList) {
       if (currentFilter === "all") return noteList;
       if (currentFilter === "mine") {
-        return noteList.filter((n) => n.authorUid === currentUserId);
+        return noteList.filter((n) => isMyNote(n));
       }
       if (currentFilter === "following") {
         const followed = getFollowedUids();
-        return noteList.filter((n) => followed.has(n.authorUid) || n.authorUid === currentUserId);
+        return noteList.filter((n) => followed.has(n.authorUid) || isMyNote(n));
       }
       return noteList;
     }
@@ -2548,7 +2579,7 @@
         els.nearbyList.innerHTML = '<p class="muted">全台還沒有紙條。</p>';
       } else {
         sorted.forEach(({ note, distance }) => {
-          const isMine = note.authorUid === currentUserId;
+          const isMine = isMyNote(note);
           const card = document.createElement("article");
           card.className = "note-card";
           card.style.cursor = "pointer";
@@ -2670,7 +2701,7 @@
       const visibleNotes = applyFilter(notes);
 
       visibleNotes.forEach((note) => {
-        const isMine = note.authorUid === currentUserId;
+        const isMine = isMyNote(note);
         const isFollowed = isFollowing(note.authorUid);
         const hasImage = noteHasImage(note);
 
@@ -2741,7 +2772,7 @@
 
     async function pickNote(note) {
       selectedNote = note;
-      const isOwn = note.authorUid === currentUserId;
+      const isOwn = isMyNote(note);
 
       openSheet("pick");
       renderPickedNote(note);
@@ -2840,54 +2871,56 @@
 
     async function showMyNotes(options = {}) {
       const { repliesOnly = false } = options;
-      const token = ++myNotesLoadToken;
 
-      closeSheets("myNotes");
+      openSheet("myNotes");
+      if (myNotesLoading) return;
+
+      myNotesLoading = true;
       els.myNotesTitle.textContent = repliesOnly ? "有回覆的紙條" : "我的紙條";
       els.myNickname.textContent = `你是「${nicknameOf(currentUserId)}」`;
       els.myNotesList.innerHTML = '<p class="muted">載入中…</p>';
-      openSheet("myNotes");
 
       try {
-        let mine = notes.filter((note) => note.authorUid === currentUserId);
-        if (token !== myNotesLoadToken) return;
-
+        const mine = notes.filter(isMyNote);
         els.myNotesList.innerHTML = "";
 
-        if (repliesOnly) {
-          const withReplies = [];
-          for (const note of mine) {
-            const replies = await loadReplies(note);
-            if (token !== myNotesLoadToken) return;
-            if (replies.length > 0) withReplies.push({ note, replies });
-          }
+        if (!mine.length) {
+          els.myNotesList.innerHTML = repliesOnly
+            ? '<p class="muted">目前還沒有人回覆你的紙條。</p>'
+            : '<p class="muted">目前還沒有丟出的紙條。</p>';
+          updateReplyAlert();
+          return;
+        }
 
-          if (!withReplies.length) {
-            els.myNotesList.innerHTML = '<p class="muted">目前還沒有人回覆你的紙條。</p>';
-            updateReplyAlert();
-            return;
-          }
+        const replyResults = await Promise.allSettled(
+          mine.map((note) => loadReplies(note))
+        );
+        const pairs = mine.map((note, i) => ({
+          note,
+          replies: replyResults[i].status === "fulfilled" ? replyResults[i].value : []
+        }));
 
-          for (const { note, replies } of withReplies) {
-            markNoteRepliesSeen(note.id, note.replyCount || replies.length);
-            renderMyNoteCard(note, replies);
-          }
-        } else if (mine.length === 0) {
-          els.myNotesList.innerHTML = '<p class="muted">目前還沒有丟出的紙條。</p>';
-        } else {
-          for (const note of mine) {
-            const replies = await loadReplies(note);
-            if (token !== myNotesLoadToken) return;
-            markNoteRepliesSeen(note.id, note.replyCount || replies.length);
-            renderMyNoteCard(note, replies);
-          }
+        const toRender = repliesOnly
+          ? pairs.filter(({ replies }) => replies.length > 0)
+          : pairs;
+
+        if (!toRender.length) {
+          els.myNotesList.innerHTML = '<p class="muted">目前還沒有人回覆你的紙條。</p>';
+          updateReplyAlert();
+          return;
+        }
+
+        for (const { note, replies } of toRender) {
+          markNoteRepliesSeen(note.id, note.replyCount || replies.length);
+          renderMyNoteCard(note, replies);
         }
 
         updateReplyAlert();
       } catch (err) {
         console.error("[我的紙條] 載入失敗", err);
-        if (token !== myNotesLoadToken) return;
         els.myNotesList.innerHTML = '<p class="muted">載入失敗，請稍後再試。</p>';
+      } finally {
+        myNotesLoading = false;
       }
     }
 
@@ -3104,6 +3137,7 @@
         lastActivityAt: serverTimestamp()
       });
       note.id = docRef.id;
+      registerAuthorUid(currentUserId);
     }
 
     /**
@@ -3406,7 +3440,7 @@
           });
 
           return sortNotesByActivity(all.filter((note) =>
-            note.reportCount < 3 || note.authorUid === currentUserId
+            note.reportCount < 3 || isMyNote(note)
           ));
         })(), 12000, "紙條載入逾時");
       } catch (err) {
