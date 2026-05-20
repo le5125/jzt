@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#fbeed4" />
-  <title>丟紙條 · 法式繪本</title>
+  <title>丟紙條</title>
 
   <!-- 法式繪本字體：Caveat（手寫流暢）+ Patrick Hand（手寫工整）+ 思源中文 -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -1421,23 +1421,26 @@
       2. OSM 台灣中文版 - 如果 NLSC 載入失敗的備援
       3. OSM 國際版 - 最後備援，台灣以外地區也能用
 
-      NLSC 用 EMAP 通用版電子地圖
+      NLSC URL 格式：注意是 GoogleMapsCompatible，不是 EPSG:3857
     */
     const TILE_SOURCES = [
       {
         name: "NLSC",
-        url: "https://wmts.nlsc.gov.tw/wmts/EMAP/default/EPSG:3857/{z}/{y}/{x}",
-        attribution: "&copy; 國土測繪中心 NLSC"
+        url: "https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{z}/{y}/{x}",
+        attribution: "&copy; 國土測繪中心 NLSC",
+        maxZoom: 18
       },
       {
         name: "OSM-TW",
         url: "https://tile.openstreetmap.tw/tiles/{z}/{x}/{y}.png",
-        attribution: "&copy; OSM Taiwan"
+        attribution: "&copy; OSM Taiwan",
+        maxZoom: 19
       },
       {
         name: "OSM-World",
         url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-        attribution: "&copy; OpenStreetMap"
+        attribution: "&copy; OpenStreetMap",
+        maxZoom: 19
       }
     ];
 
@@ -1446,58 +1449,81 @@
 
     function tryTileSource(index) {
       if (index >= TILE_SOURCES.length) {
-        console.error("[圖磚] 所有來源都失敗");
+        console.error("[圖磚] 所有來源都失敗，請檢查網路");
+        showToast("地圖載入失敗，請檢查網路");
         return;
       }
       const src = TILE_SOURCES[index];
-      console.log(`[圖磚] 嘗試 ${src.name}`);
+      console.log(`[圖磚] 嘗試 ${src.name}：${src.url}`);
 
       if (currentTileLayer) {
         map.removeLayer(currentTileLayer);
       }
 
       const layer = L.tileLayer(src.url, {
-        maxZoom: 19,
+        maxZoom: src.maxZoom || 19,
         attribution: src.attribution
       });
 
       let errorCount = 0;
       let firstTileLoaded = false;
+      let timeoutId = null;
 
-      layer.on("tileerror", () => {
+      layer.on("tileerror", (e) => {
         errorCount++;
-        // 沒成功載入過任何瓦片、且錯誤 >= 3，視為來源失敗，切下一個
+        console.warn(`[圖磚] ${src.name} 錯誤 #${errorCount}`, e?.tile?.src || "");
         if (!firstTileLoaded && errorCount >= 3) {
           console.warn(`[圖磚] ${src.name} 失敗，切換下一個`);
+          clearTimeout(timeoutId);
           tryTileSource(index + 1);
         }
       });
 
       layer.on("tileload", () => {
-        firstTileLoaded = true;
+        if (!firstTileLoaded) {
+          console.log(`[圖磚] ${src.name} 載入成功 ✓`);
+          firstTileLoaded = true;
+          clearTimeout(timeoutId);
+        }
       });
 
       layer.addTo(map);
       currentTileLayer = layer;
       currentTileIndex = index;
+
+      // 雙保險：6 秒內沒有任何瓦片載入成功，直接切下一個
+      timeoutId = setTimeout(() => {
+        if (!firstTileLoaded) {
+          console.warn(`[圖磚] ${src.name} 6 秒沒回應，切換下一個`);
+          tryTileSource(index + 1);
+        }
+      }, 6000);
     }
 
     tryTileSource(0);
 
     // 開場動畫結束後強制重新計算地圖尺寸
-    // 避免動畫期間地圖容器尺寸還沒對、瓦片載入位置錯亂
+    // 為什麼這樣做：splash 動畫期間 z-index 9999 蓋著畫面，Leaflet 可能拿到
+    // 錯的容器尺寸；動畫結束時 invalidateSize() 強迫它重算。
+    // 為了保險，多次呼叫——時機點難以預測（手機 vs 桌機、字體載入快慢都有差）
     const splashEl = document.querySelector("#splash");
-    if (splashEl) {
-      // 動畫淡出後（1.6 秒）或被點擊提早結束時
-      const fixMap = () => {
-        map.invalidateSize();
-        console.log("[地圖] 重新計算尺寸完成");
-      };
-      splashEl.addEventListener("animationend", fixMap);
-      splashEl.addEventListener("click", () => setTimeout(fixMap, 350));
-      // 雙保險：1.8 秒後不管怎樣都修一次
-      setTimeout(fixMap, 1800);
+    function fixMapSize(label) {
+      map.invalidateSize();
+      console.log(`[地圖] invalidateSize 觸發 (${label})`);
     }
+
+    // 1. 動畫淡出完成
+    if (splashEl) {
+      splashEl.addEventListener("animationend", () => fixMapSize("animationend"));
+      splashEl.addEventListener("click", () => setTimeout(() => fixMapSize("user-skip"), 350));
+    }
+    // 2. 連續觸發三次 invalidateSize，分別在動畫前/中/後
+    //    確保任何時機點都至少有一次成功
+    setTimeout(() => fixMapSize("500ms"), 500);
+    setTimeout(() => fixMapSize("1.2s"), 1200);
+    setTimeout(() => fixMapSize("2s"), 2000);
+    // 3. 視窗 resize 也重算（手機橫直切換、瀏覽器調大小）
+    window.addEventListener("resize", () => fixMapSize("resize"));
 
     markersLayer = L.layerGroup().addTo(map);
     userMarker = L.marker([taipei.lat, taipei.lng], {
