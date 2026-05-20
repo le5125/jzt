@@ -683,15 +683,20 @@
         isSeed: false
       };
 
-      await saveNote(note);
-      notes.unshift(note);
-      saveDemoNotes();
-      els.noteInput.value = "";
-      els.countText.textContent = "140 字";
-      els.submitNoteButton.disabled = true;
-      closeSheets();
-      renderNotes();
-      showToast("紙條已丟出去");
+      try {
+        await saveNote(note);
+        notes.unshift(note);
+        saveDemoNotes();
+        els.noteInput.value = "";
+        els.countText.textContent = "140 字";
+        els.submitNoteButton.disabled = true;
+        closeSheets();
+        renderNotes();
+        showToast("紙條已丟出去");
+      } catch (error) {
+        console.error(error);
+        showToast("Firebase 寫入失敗，請檢查 Authentication 和 Firestore");
+      }
     });
 
     els.cityForm.addEventListener("submit", async (event) => {
@@ -771,9 +776,15 @@
     async function refreshNotes() {
       els.cityText.textContent = currentCity;
 
-      if (hasFirebase) {
-        notes = await loadFirebaseNotes();
-      } else {
+      try {
+        if (hasFirebase) {
+          notes = await loadFirebaseNotes();
+        } else {
+          notes = loadDemoNotes();
+        }
+      } catch (error) {
+        console.error(error);
+        showToast("Firebase 讀取失敗，先顯示測試紙條");
         notes = loadDemoNotes();
       }
 
@@ -956,7 +967,6 @@
       const snapshot = await getDocs(
         query(
           collection(db, "notes"),
-          where("city", "==", currentCity),
           where("expiresAt", ">", Timestamp.now()),
           orderBy("expiresAt", "asc"),
           limit(50)
