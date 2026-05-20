@@ -91,7 +91,8 @@
 
     /* ========== 開場動畫 ========== */
     /* 進入時蓋一張全螢幕「信鴿叼紙條飛過」動畫
-       1.8 秒後自動淡出消失，使用者看不到資料載入的閃爍 */
+       1.2 秒後自動淡出消失，使用者看不到資料載入的閃爍
+       使用者也可以點任何地方提早關閉 */
     .splash {
       position: fixed;
       inset: 0;
@@ -105,26 +106,30 @@
       align-items: center;
       justify-content: center;
       gap: 16px;
-      animation: splashFade 0.5s ease-in 1.5s forwards;
-      pointer-events: none;
+      cursor: pointer;
+      animation: splashFade 0.4s ease-in 1.2s forwards;
+    }
+    /* 使用者點擊也能立刻消失 */
+    .splash.dismissed {
+      animation: splashFade 0.3s ease-in forwards;
     }
     @keyframes splashFade {
-      to { opacity: 0; visibility: hidden; }
+      to { opacity: 0; visibility: hidden; pointer-events: none; }
     }
 
     .splash-scene {
       position: relative;
       width: 260px;
-      height: 160px;
+      height: 120px;
     }
 
     .splash-bird {
       position: absolute;
       width: 80px;
       height: 80px;
-      top: 40px;
+      top: 20px;
       left: -90px;
-      animation: birdFly 1.5s cubic-bezier(0.3, 0, 0.5, 1) forwards;
+      animation: birdFly 1.2s cubic-bezier(0.3, 0, 0.5, 1) forwards;
     }
     @keyframes birdFly {
       0%   { transform: translateX(0) translateY(0) rotate(-3deg); }
@@ -144,13 +149,14 @@
 
     .splash-title {
       font-family: "Caveat", cursive;
-      font-size: 48px;
+      font-size: 56px;
       font-weight: 700;
       color: var(--ink);
       text-shadow: 3px 3px 0 var(--mustard);
       letter-spacing: 0.05em;
       transform: rotate(-2deg);
-      animation: splashTitle 0.6s ease-out 0.3s both;
+      margin: 0;
+      animation: splashTitle 0.5s ease-out 0.2s both;
     }
     @keyframes splashTitle {
       from { opacity: 0; transform: rotate(-2deg) translateY(20px); }
@@ -158,10 +164,20 @@
     }
 
     .splash-subtitle {
-      font-size: 16px;
+      font-size: 15px;
       color: var(--ink-soft);
       letter-spacing: 0.2em;
-      animation: splashTitle 0.6s ease-out 0.6s both;
+      margin: 0;
+      animation: splashTitle 0.5s ease-out 0.4s both;
+    }
+
+    .splash-skip {
+      position: absolute;
+      bottom: 32px;
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: 0.15em;
+      animation: splashTitle 0.5s ease-out 0.6s both;
     }
 
     /* ========== 地圖 ========== */
@@ -663,6 +679,43 @@
     }
 
     /* ========== 撿到紙條 - 主體 ========== */
+    /* 紙條來自誰 - 匿名綽號 */
+    .picked-author {
+      margin: 0 0 4px 4px;
+      font-family: "Caveat", cursive;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--ink);
+      transform: rotate(-1deg);
+      display: inline-block;
+      padding: 4px 14px;
+      background: var(--mustard);
+      border: 2.5px solid var(--ink);
+      border-radius: 14px 16px 13px 15px;
+      box-shadow: 2px 3px 0 var(--ink);
+    }
+    .picked-author.mine {
+      background: var(--olive);
+      color: var(--paper-light);
+    }
+
+    /* 我的紙條頁：顯示自己的綽號 */
+    .my-nickname {
+      margin: 18px 0 0 4px;
+      font-family: "Caveat", cursive;
+      font-size: 22px;
+      color: var(--ink);
+      font-weight: 700;
+      display: inline-block;
+      padding: 6px 16px;
+      background: var(--olive);
+      color: var(--paper-light);
+      border: 2.5px solid var(--ink);
+      border-radius: 14px 18px 13px 16px;
+      box-shadow: 2px 3px 0 var(--ink);
+      transform: rotate(-1deg);
+    }
+
     .note-content {
       margin: 0;
       padding: 24px;
@@ -987,8 +1040,8 @@
 </head>
 
 <body>
-  <!-- ============= 開場動畫（1.5 秒後自動淡出） ============= -->
-  <div class="splash" aria-hidden="true">
+  <!-- ============= 開場動畫（1.2 秒後自動淡出；點任意處可提早關） ============= -->
+  <div class="splash" id="splash" aria-hidden="true" onclick="this.classList.add('dismissed')">
     <div class="splash-scene" aria-hidden="true">
       <!-- 信鴿叼著紙條飛過 -->
       <svg class="splash-bird" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
@@ -1018,6 +1071,7 @@
     </div>
     <h1 class="splash-title">丟紙條</h1>
     <p class="splash-subtitle">在地圖上輕輕放下一句話</p>
+    <p class="splash-skip">點任意處跳過</p>
   </div>
 
   <main id="app">
@@ -1122,6 +1176,7 @@
         <button class="close-button" type="button" data-close>×</button>
       </header>
       <article class="picked-note">
+        <p id="pickedAuthor" class="picked-author">—</p>
         <p id="pickedContent" class="note-content"></p>
         <dl class="note-meta">
           <div>
@@ -1198,6 +1253,7 @@
         </button>
         <h1>我的紙條</h1>
       </header>
+      <p id="myNickname" class="my-nickname">—</p>
       <div id="myNotesList" class="note-list"></div>
     </section>
   </main>
@@ -1333,6 +1389,7 @@
       submitNoteButton: document.querySelector("#submitNoteButton"),
       throwForm: document.querySelector("#throwForm"),
       pickedContent: document.querySelector("#pickedContent"),
+      pickedAuthor: document.querySelector("#pickedAuthor"),
       pickedCity: document.querySelector("#pickedCity"),
       pickedCount: document.querySelector("#pickedCount"),
       pickedTime: document.querySelector("#pickedTime"),
@@ -1348,6 +1405,7 @@
       myNotesButton: document.querySelector("#myNotesButton"),
       myNotesPage: document.querySelector("#myNotesPage"),
       myNotesList: document.querySelector("#myNotesList"),
+      myNickname: document.querySelector("#myNickname"),
       backButton: document.querySelector("#backButton"),
       cityForm: document.querySelector("#cityForm"),
       cityInput: document.querySelector("#cityInput"),
@@ -1356,11 +1414,90 @@
     };
 
     const map = L.map("map", { zoomControl: false }).setView([taipei.lat, taipei.lng], 15);
-    // 台灣社群維護的 OSM 中文版圖資，街道名稱全中文化、台灣街區更精細
-    L.tileLayer("https://tile.openstreetmap.tw/tiles/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "&copy; OpenStreetMap Taiwan"
-    }).addTo(map);
+
+    /*
+      地圖瓦片來源策略：依序嘗試
+      1. NLSC 國土測繪中心 - 台灣官方圖資、全中文、最精細
+      2. OSM 台灣中文版 - 如果 NLSC 載入失敗的備援
+      3. OSM 國際版 - 最後備援，台灣以外地區也能用
+
+      NLSC 用 EMAP 通用版電子地圖
+    */
+    const TILE_SOURCES = [
+      {
+        name: "NLSC",
+        url: "https://wmts.nlsc.gov.tw/wmts/EMAP/default/EPSG:3857/{z}/{y}/{x}",
+        attribution: "&copy; 國土測繪中心 NLSC"
+      },
+      {
+        name: "OSM-TW",
+        url: "https://tile.openstreetmap.tw/tiles/{z}/{x}/{y}.png",
+        attribution: "&copy; OSM Taiwan"
+      },
+      {
+        name: "OSM-World",
+        url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        attribution: "&copy; OpenStreetMap"
+      }
+    ];
+
+    let currentTileLayer = null;
+    let currentTileIndex = 0;
+
+    function tryTileSource(index) {
+      if (index >= TILE_SOURCES.length) {
+        console.error("[圖磚] 所有來源都失敗");
+        return;
+      }
+      const src = TILE_SOURCES[index];
+      console.log(`[圖磚] 嘗試 ${src.name}`);
+
+      if (currentTileLayer) {
+        map.removeLayer(currentTileLayer);
+      }
+
+      const layer = L.tileLayer(src.url, {
+        maxZoom: 19,
+        attribution: src.attribution
+      });
+
+      let errorCount = 0;
+      let firstTileLoaded = false;
+
+      layer.on("tileerror", () => {
+        errorCount++;
+        // 沒成功載入過任何瓦片、且錯誤 >= 3，視為來源失敗，切下一個
+        if (!firstTileLoaded && errorCount >= 3) {
+          console.warn(`[圖磚] ${src.name} 失敗，切換下一個`);
+          tryTileSource(index + 1);
+        }
+      });
+
+      layer.on("tileload", () => {
+        firstTileLoaded = true;
+      });
+
+      layer.addTo(map);
+      currentTileLayer = layer;
+      currentTileIndex = index;
+    }
+
+    tryTileSource(0);
+
+    // 開場動畫結束後強制重新計算地圖尺寸
+    // 避免動畫期間地圖容器尺寸還沒對、瓦片載入位置錯亂
+    const splashEl = document.querySelector("#splash");
+    if (splashEl) {
+      // 動畫淡出後（1.6 秒）或被點擊提早結束時
+      const fixMap = () => {
+        map.invalidateSize();
+        console.log("[地圖] 重新計算尺寸完成");
+      };
+      splashEl.addEventListener("animationend", fixMap);
+      splashEl.addEventListener("click", () => setTimeout(fixMap, 350));
+      // 雙保險：1.8 秒後不管怎樣都修一次
+      setTimeout(fixMap, 1800);
+    }
 
     markersLayer = L.layerGroup().addTo(map);
     userMarker = L.marker([taipei.lat, taipei.lng], {
@@ -1640,7 +1777,7 @@
           const meta = document.createElement("span");
           meta.className = "muted";
           const distText = distance < 1000 ? `${Math.round(distance)} 公尺` : `${(distance / 1000).toFixed(1)} 公里`;
-          meta.textContent = `${isMine ? "📜 我的" : "📃 別人"} · ${distText} · 被撿起 ${note.pickedCount} 次`;
+          meta.textContent = `${isMine ? "📜 我的" : "📃 " + nicknameOf(note.authorUid)} · ${distText} · 被撿起 ${note.pickedCount} 次`;
           card.appendChild(meta);
 
           card.addEventListener("click", () => {
@@ -1789,6 +1926,8 @@
       }
 
       renderPickedNote(note);
+      els.pickedAuthor.textContent = isOwn ? `來自我（${nicknameOf(note.authorUid)}）` : `來自 ${nicknameOf(note.authorUid)}`;
+      els.pickedAuthor.classList.toggle("mine", isOwn);
       els.pickedCity.textContent = note.city;
       els.pickedCount.textContent = `${note.pickedCount} 次`;
       els.pickedTime.textContent = new Date(note.createdAt).toLocaleString("zh-TW");
@@ -1856,6 +1995,9 @@
     }
 
     async function showMyNotes() {
+      // 顯示自己的綽號
+      els.myNickname.textContent = `你是「${nicknameOf(currentUserId)}」`;
+
       const mine = notes.filter((note) => note.authorUid === currentUserId);
       els.myNotesList.innerHTML = "";
 
@@ -2251,6 +2393,47 @@
       const result = new Date(date);
       result.setDate(result.getDate() + days);
       return result;
+    }
+
+    /*
+      ============= 匿名綽號系統 =============
+      根據 UID 生成穩定的「形容詞 + 動物 + #編號」
+      同一個 UID 永遠生成同一個綽號
+      範例：沉默的螢火蟲 #4291、漂泊的水獺 #1023
+    */
+    const NICKNAME_ADJECTIVES = [
+      "沉默的", "漂泊的", "夜行的", "輕盈的", "悠遊的", "勇敢的",
+      "溫柔的", "認真的", "清晨的", "黃昏的", "雨後的", "迷路的",
+      "好奇的", "做夢的", "微笑的", "靜謐的", "閃爍的", "獨自的",
+      "遠方的", "聆聽的", "守候的", "走神的", "懷舊的", "出走的",
+      "唱歌的", "畫畫的", "釣魚的", "散步的", "種花的", "聞香的"
+    ];
+    const NICKNAME_ANIMALS = [
+      "螢火蟲", "水獺", "灰鷺", "鯨魚", "麻雀", "白鴿", "貓頭鷹",
+      "刺蝟", "松鼠", "袋鼠", "海豹", "狐狸", "海星", "蝸牛",
+      "兔子", "鹿", "羚羊", "山雀", "燕子", "海鷗", "鯨豚",
+      "獾", "土撥鼠", "穿山甲", "貉", "石虎", "雲豹", "黑熊",
+      "藍鵲", "綠繡眼", "夜鶯", "杜鵑", "信天翁", "企鵝", "海馬"
+    ];
+
+    // 把 UID 字串雜湊成一個非負整數
+    function hashStr(str) {
+      let h = 5381;
+      for (let i = 0; i < str.length; i++) {
+        h = ((h << 5) + h) + str.charCodeAt(i);
+        h = h & 0xffffffff;  // 保持 32 bit
+      }
+      return Math.abs(h);
+    }
+
+    function nicknameOf(uid) {
+      if (!uid) return "路過的旅人";
+      if (uid === "seed") return "投條問路使者";
+      const h = hashStr(uid);
+      const adj = NICKNAME_ADJECTIVES[h % NICKNAME_ADJECTIVES.length];
+      const ani = NICKNAME_ANIMALS[Math.floor(h / NICKNAME_ADJECTIVES.length) % NICKNAME_ANIMALS.length];
+      const num = (h % 9000) + 1000;  // 1000~9999 編號
+      return `${adj}${ani} #${num}`;
     }
 
     function distanceMeters(a, b) {
