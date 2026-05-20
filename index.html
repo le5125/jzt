@@ -1240,6 +1240,19 @@
     <p class="splash-subtitle">在地圖上輕輕放下一句話</p>
   </div>
 
+  <script>
+    // 保底：就算主程式卡住，最多 8 秒也會關閉開場
+    setTimeout(function () {
+      if (!document.body.classList.contains("is-booting")) return;
+      document.body.classList.remove("is-booting");
+      var splash = document.getElementById("splash");
+      if (splash) {
+        splash.classList.add("ready");
+        splash.setAttribute("aria-hidden", "true");
+      }
+    }, 8000);
+  </script>
+
   <main id="app">
     <div id="map"></div>
 
@@ -1474,7 +1487,10 @@
     const LIFF_ID = "2010143431-l2kcIl8v";
     const DAILY_LIMIT = 10;
     const MIN_SPLASH_MS = 600;
-    const BOOT_TILE_TIMEOUT_MS = 3000;
+
+    function delay(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
 
     let hasFirebase = Boolean(
       firebaseConfig.apiKey &&
@@ -1497,7 +1513,10 @@
 
     if (LIFF_ID && typeof liff !== "undefined") {
       try {
-        await liff.init({ liffId: LIFF_ID });
+        await Promise.race([
+          liff.init({ liffId: LIFF_ID }),
+          delay(5000)
+        ]);
         inLiff = liff.isInClient();
         console.log("[LIFF] 初始化完成，inClient =", inLiff);
 
@@ -1535,7 +1554,10 @@
       const storage = storageModule.getStorage(app);
       firebaseApi = { authModule, firestoreModule, storageModule, storage };
 
-      await authModule.signInAnonymously(auth);
+      await Promise.race([
+        authModule.signInAnonymously(auth),
+        delay(5000)
+      ]);
 
       // 重要：Firebase Auth 的 uid 跟我們的 currentUserId 不一定一樣
       // - 沒 LIFF 登入：currentUserId 用 Firebase 匿名 uid（之前邏輯）
@@ -1731,7 +1753,9 @@
     }
 
     if (splashEl) {
-      splashEl.addEventListener("animationend", () => fixMapSize("animationend"));
+      splashEl.addEventListener("animationend", (event) => {
+        if (event.target === splashEl) fixMapSize("animationend");
+      });
     }
 
     function preloadImage(src) {
@@ -1743,10 +1767,6 @@
       });
     }
 
-    function delay(ms) {
-      return new Promise((resolve) => setTimeout(resolve, ms));
-    }
-
     function getTodayThrowCount() {
       const today = new Date().toISOString().slice(0, 10);
       const usage = JSON.parse(localStorage.getItem("jzt_daily_usage") || "{}");
@@ -1755,14 +1775,19 @@
 
     function updateThrowRemainingLabel() {
       const remaining = Math.max(0, DAILY_LIMIT - getTodayThrowCount());
-      els.throwRemainingText.textContent = `今日剩 ${remaining} 次`;
-      els.openThrowButton.setAttribute(
-        "aria-label",
-        remaining > 0 ? `丟紙條，今日剩 ${remaining} 次` : "今日次數已用完"
-      );
+      if (els.throwRemainingText) {
+        els.throwRemainingText.textContent = `今日剩 ${remaining} 次`;
+      }
+      if (els.openThrowButton) {
+        els.openThrowButton.setAttribute(
+          "aria-label",
+          remaining > 0 ? `丟紙條，今日剩 ${remaining} 次` : "今日次數已用完"
+        );
+      }
     }
 
     function renderInitialNotes() {
+      if (!markersLayer) return;
       notes = loadDemoNotes();
       els.cityText.textContent = currentCity;
       const nearbyCount = notes.filter((note) =>
@@ -1774,34 +1799,51 @@
       renderNotes();
     }
 
+    let bootFinished = false;
+
     async function revealApp() {
       const bootStart = performance.now();
+      const hardCapTimer = setTimeout(() => finishBoot("hard-cap"), 4500);
 
-      try {
-        // 開場只等「看得見」的資源；定位與 Firebase 改背景載入
-        await Promise.all([
-          Promise.race([document.fonts?.ready ?? Promise.resolve(), delay(1500)]),
-          preloadImage("paper_ball.png").catch(() => {}),
-          Promise.race([bootTileReady, delay(BOOT_TILE_TIMEOUT_MS)])
-        ]);
-      } catch (err) {
-        console.warn("[開場] 部分資源載入失敗，仍繼續顯示", err);
+      async function finishBoot(reason) {
+        if (bootFinished) return;
+        bootFinished = true;
+        clearTimeout(hardCapTimer);
+        console.log(`[開場] 關閉載入畫面 (${reason})`);
+
+        try {
+          renderInitialNotes();
+          updateThrowRemainingLabel();
+          map.invalidateSize();
+        } catch (err) {
+          console.warn("[開場] 初始畫面失敗", err);
+        }
+
+        dismissSplash();
+
+        refreshNotes().catch((err) => console.warn("[背景] 紙條載入失敗", err));
+        locateMe().catch((err) => console.warn("[背景] 定位失敗", err));
       }
 
-      renderInitialNotes();
-      updateThrowRemainingLabel();
-      map.invalidateSize();
+      try {
+        // 開場只等 UI 資源；地圖瓦片在 #app 隱藏時可能不載入，不阻塞開場
+        await Promise.race([
+          Promise.all([
+            Promise.race([document.fonts?.ready ?? Promise.resolve(), delay(1200)]),
+            Promise.race([preloadImage("paper_ball.png"), delay(1500)]).catch(() => {})
+          ]),
+          delay(2000)
+        ]);
+      } catch (err) {
+        console.warn("[開場] 資源等待失敗", err);
+      }
 
       const elapsed = performance.now() - bootStart;
       if (elapsed < MIN_SPLASH_MS) {
         await delay(MIN_SPLASH_MS - elapsed);
       }
 
-      dismissSplash();
-
-      // 背景載入：不擋開場動畫
-      refreshNotes().catch((err) => console.warn("[背景] 紙條載入失敗", err));
-      locateMe().catch((err) => console.warn("[背景] 定位失敗", err));
+      await finishBoot("ready");
     }
 
     markersLayer = L.layerGroup().addTo(map);
@@ -1813,6 +1855,8 @@
         iconAnchor: [11, 11]
       })
     }).addTo(map);
+
+    revealApp();
 
     window.addEventListener("resize", () => fixMapSize("resize"));
 
@@ -2044,8 +2088,6 @@
       const hasImage = Boolean(els.imageInput.files?.[0]);
       els.submitNoteButton.disabled = !hasText && !hasImage;
     }
-
-    revealApp();
 
     function openSheet(name) {
       closeSheets();
