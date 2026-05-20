@@ -57,8 +57,12 @@
     button, textarea, input { font: inherit; color: inherit; }
     button { cursor: pointer; -webkit-tap-highlight-color: transparent; background: none; border: 0; padding: 0; }
 
-    body.is-booting #app {
-      visibility: hidden;
+    body.is-booting .splash {
+      pointer-events: auto;
+    }
+
+    body:not(.is-booting) .splash.ready {
+      display: none;
     }
 
     body {
@@ -108,7 +112,7 @@
       align-items: center;
       justify-content: center;
       gap: 16px;
-      pointer-events: none;
+      pointer-events: auto;
     }
     /* 首頁載入完成後自動淡出 */
     .splash.ready {
@@ -1311,16 +1315,20 @@
   </div>
 
   <script>
-    // 保底：就算主程式卡住，最多 8 秒也會關閉開場
+    // 保底：主程式卡住時，最多 6 秒強制關閉開場
     setTimeout(function () {
-      if (!document.body.classList.contains("is-booting")) return;
+      if (typeof window.__jztDismissBoot === "function") {
+        window.__jztDismissBoot("html-fallback");
+        return;
+      }
       document.body.classList.remove("is-booting");
       var splash = document.getElementById("splash");
       if (splash) {
         splash.classList.add("ready");
         splash.setAttribute("aria-hidden", "true");
+        splash.style.display = "none";
       }
-    }, 8000);
+    }, 6000);
   </script>
 
   <main id="app">
@@ -1612,9 +1620,14 @@
         if (!liff.isLoggedIn()) {
           console.log("[LIFF] 未登入，使用匿名模式");
         } else {
-          const profile = await liff.getProfile();
-          lineProfile = profile;
-          console.log("[LIFF] 已登入，userId =", profile.userId.slice(0, 6) + "...");
+          const profile = await Promise.race([
+            liff.getProfile(),
+            delay(3000)
+          ]);
+          if (profile?.userId) {
+            lineProfile = profile;
+            console.log("[LIFF] 已登入，userId =", profile.userId.slice(0, 6) + "...");
+          }
         }
       } catch (err) {
         console.error("[LIFF] 初始化失敗（不影響網頁版運作）", err);
@@ -1624,18 +1637,28 @@
     async function initFirebase() {
       if (!hasFirebase) return;
       try {
-        const [appModule, authModule, firestoreModule, storageModule] = await Promise.all([
-          import("https://www.gstatic.com/firebasejs/11.2.0/firebase-app.js"),
-          import("https://www.gstatic.com/firebasejs/11.2.0/firebase-auth.js"),
-          import("https://www.gstatic.com/firebasejs/11.2.0/firebase-firestore.js"),
-          import("https://www.gstatic.com/firebasejs/11.2.0/firebase-storage.js")
+        const [appModule, authModule, firestoreModule] = await Promise.all([
+          withTimeout(
+            import("https://www.gstatic.com/firebasejs/11.2.0/firebase-app.js"),
+            8000,
+            "Firebase 模組載入逾時"
+          ),
+          withTimeout(
+            import("https://www.gstatic.com/firebasejs/11.2.0/firebase-auth.js"),
+            8000,
+            "Firebase Auth 載入逾時"
+          ),
+          withTimeout(
+            import("https://www.gstatic.com/firebasejs/11.2.0/firebase-firestore.js"),
+            8000,
+            "Firestore 載入逾時"
+          )
         ]);
 
         const app = appModule.initializeApp(firebaseConfig);
         auth = authModule.getAuth(app);
         db = firestoreModule.getFirestore(app);
-        const storage = storageModule.getStorage(app);
-        firebaseApi = { authModule, firestoreModule, storageModule, storage };
+        firebaseApi = { authModule, firestoreModule, storageModule: null, storage: null };
 
         await Promise.race([
           authModule.signInAnonymously(auth),
@@ -1650,15 +1673,15 @@
       }
     }
 
-    // LIFF 與 Firebase 同時初始化，縮短進入前的等待
-    await Promise.all([initLiff(), initFirebase()]);
-
-    if (lineProfile) {
-      currentUserId = `line_${lineProfile.userId}`;
-    } else if (auth?.currentUser) {
-      currentUserId = auth.currentUser.uid;
+    function applyAuthIdentity() {
+      if (lineProfile) {
+        currentUserId = `line_${lineProfile.userId}`;
+      } else if (auth?.currentUser) {
+        currentUserId = auth.currentUser.uid;
+      }
+      localStorage.setItem("jzt_demo_uid", currentUserId);
+      restoreLastLocation();
     }
-    localStorage.setItem("jzt_demo_uid", currentUserId);
 
     function restoreLastLocation() {
       try {
@@ -1860,7 +1883,12 @@
       splashEl?.classList.add("ready");
       splashEl?.setAttribute("aria-hidden", "true");
       document.body.classList.remove("is-booting");
-      setTimeout(() => fixMapSize("splash-dismiss"), 450);
+      setTimeout(() => {
+        if (splashEl?.classList.contains("ready")) {
+          splashEl.style.display = "none";
+        }
+        fixMapSize("splash-dismiss");
+      }, 450);
     }
 
     if (splashEl) {
@@ -2013,20 +2041,31 @@
     }
 
     let bootFinished = false;
+    let finishBootRef = null;
+
+    window.__jztDismissBoot = (reason) => {
+      if (finishBootRef) finishBootRef(reason || "fallback");
+    };
 
     async function revealApp() {
       const bootStart = performance.now();
-      const hardCapTimer = setTimeout(() => finishBoot("hard-cap"), 6000);
+      const hardCapTimer = setTimeout(() => finishBoot("hard-cap"), 5000);
 
       async function finishBoot(reason) {
         if (bootFinished) return;
         bootFinished = true;
+        finishBootRef = null;
         clearTimeout(hardCapTimer);
         console.log(`[開場] 關閉載入畫面 (${reason})`);
 
         try {
           updateThrowRemainingLabel();
-          if (markersLayer) renderNotes();
+          if (markersLayer) {
+            if (!notes.length && hasFirebase) {
+              applyNotesCache();
+            }
+            renderNotes();
+          }
           updateReplyAlert();
           map.invalidateSize();
         } catch (err) {
@@ -2037,44 +2076,54 @@
 
         syncPickedNotesFromFirebase().catch((err) => console.warn("[背景] 撿記錄同步失敗", err));
         locateMe({ refreshAfter: false }).catch((err) => console.warn("[背景] 定位失敗", err));
-        if (reason === "hard-cap" && hasFirebase) {
+        if (hasFirebase) {
           refreshNotes({ background: true }).catch((err) => console.warn("[背景] 紙條載入失敗", err));
         }
       }
 
+      finishBootRef = finishBoot;
+
       loadPickedNotesLocal();
-      const hadCache = hasFirebase && applyNotesCache();
-      if (hadCache) {
-        els.cityText.textContent = currentCity;
-      }
 
       try {
+        await withTimeout(
+          Promise.all([initLiff(), initFirebase()]),
+          8000,
+          "登入初始化逾時"
+        ).catch((err) => console.warn("[開場] LIFF/Firebase 逾時，先用快取", err));
+
+        applyAuthIdentity();
+        loadPickedNotesLocal();
+        const hadCache = hasFirebase && applyNotesCache();
+        if (hadCache) {
+          els.cityText.textContent = currentCity;
+        }
+
         await Promise.race([
           Promise.all([
-            Promise.race([document.fonts?.ready ?? Promise.resolve(), delay(600)]),
-            Promise.race([preloadImage("paper_ball.png"), delay(800)]).catch(() => {}),
+            Promise.race([document.fonts?.ready ?? Promise.resolve(), delay(400)]),
+            Promise.race([preloadImage("paper_ball.png"), delay(600)]).catch(() => {}),
+            Promise.race([bootTileReady, delay(2500)]),
             hasFirebase
               ? Promise.race([
                   refreshNotes({ background: hadCache }),
-                  delay(hadCache ? 2500 : 4000)
+                  delay(hadCache ? 2000 : 3500)
                 ])
               : (async () => {
-                  await loadPickedNotesLocal();
                   renderInitialNotes();
                 })()
           ]),
-          delay(4500)
+          delay(4000)
         ]);
       } catch (err) {
         console.warn("[開場] 資源等待失敗", err);
+      } finally {
+        const elapsed = performance.now() - bootStart;
+        if (elapsed < MIN_SPLASH_MS) {
+          await delay(MIN_SPLASH_MS - elapsed);
+        }
+        await finishBoot("ready");
       }
-
-      const elapsed = performance.now() - bootStart;
-      if (elapsed < MIN_SPLASH_MS) {
-        await delay(MIN_SPLASH_MS - elapsed);
-      }
-
-      await finishBoot("ready");
     }
 
     markersLayer = L.layerGroup().addTo(map);
@@ -2585,6 +2634,9 @@
         }
       } catch (error) {
         console.error(error);
+        if (background && !notes.length) {
+          applyNotesCache();
+        }
         if (!background && !notes.length) {
           showToast("Firebase 讀取失敗，先顯示測試紙條");
           notes = loadDemoNotes();
@@ -2601,6 +2653,7 @@
     }
 
     function renderNotes() {
+      if (!markersLayer) return;
       markersLayer.clearLayers();
 
       // 全台紙條都顯示；篩選器只決定顯示誰的
@@ -3209,14 +3262,21 @@
 
     async function loadPickCountsByNoteId() {
       if (!hasFirebase) return {};
-      const { collection, getDocs } = firebaseApi.firestoreModule;
-      const snapshot = await getDocs(collection(db, "note_picks"));
-      const counts = {};
-      snapshot.forEach((docSnap) => {
-        const noteId = docSnap.data().noteId;
-        if (noteId) counts[noteId] = (counts[noteId] || 0) + 1;
-      });
-      return counts;
+      try {
+        return await withTimeout((async () => {
+          const { collection, getDocs } = firebaseApi.firestoreModule;
+          const snapshot = await getDocs(collection(db, "note_picks"));
+          const counts = {};
+          snapshot.forEach((docSnap) => {
+            const noteId = docSnap.data().noteId;
+            if (noteId) counts[noteId] = (counts[noteId] || 0) + 1;
+          });
+          return counts;
+        })(), 6000, "撿取統計逾時");
+      } catch (err) {
+        console.warn("[撿取] 統計載入失敗，略過", err);
+        return {};
+      }
     }
 
     async function getPickCountForNote(noteId) {
@@ -3231,74 +3291,79 @@
     }
 
     async function loadFirebaseNotes() {
-      const {
-        collection,
-        getDocs,
-        limit,
-        orderBy,
-        query
-      } = firebaseApi.firestoreModule;
+      if (!hasFirebase) return [];
 
-      let snapshot;
       try {
-        snapshot = await getDocs(
-          query(
-            collection(db, "notes"),
-            orderBy("lastActivityAt", "desc"),
-            limit(MAP_NOTE_LIMIT)
-          )
-        );
+        return await withTimeout((async () => {
+          const {
+            collection,
+            getDocs,
+            limit,
+            orderBy,
+            query
+          } = firebaseApi.firestoreModule;
+
+          let snapshot;
+          try {
+            snapshot = await getDocs(
+              query(
+                collection(db, "notes"),
+                orderBy("lastActivityAt", "desc"),
+                limit(MAP_NOTE_LIMIT)
+              )
+            );
+          } catch (err) {
+            console.warn("[紙條] lastActivityAt 索引尚未建立，改用 createdAt", err);
+            snapshot = await getDocs(
+              query(
+                collection(db, "notes"),
+                orderBy("createdAt", "desc"),
+                limit(MAP_NOTE_LIMIT)
+              )
+            );
+          }
+
+          const pickCounts = await loadPickCountsByNoteId();
+
+          const all = snapshot.docs.map((doc) => {
+            const data = doc.data();
+            const imageUrls = Array.isArray(data.imageUrls) && data.imageUrls.length
+              ? data.imageUrls.filter(Boolean).slice(0, MAX_IMAGES_PER_NOTE)
+              : (data.imageUrl ? [data.imageUrl] : []);
+            const createdAt = data.createdAt?.toDate?.().toISOString() || new Date().toISOString();
+            const lastActivityAt = data.lastActivityAt?.toDate?.().toISOString()
+              || data.lastDriftAt?.toDate?.().toISOString()
+              || createdAt;
+            return {
+              id: doc.id,
+              authorUid: data.authorUid,
+              type: data.type,
+              content: data.content,
+              imageUrl: imageUrls[0] || "",
+              imageUrls,
+              location: {
+                lat: data.location.latitude,
+                lng: data.location.longitude
+              },
+              city: data.city,
+              createdAt,
+              lastActivityAt,
+              expiresAt: data.expiresAt?.toDate?.().toISOString() || addDays(new Date(), 30).toISOString(),
+              pickedCount: pickCounts[doc.id] ?? (data.pickedCount || 0),
+              replyCount: data.replyCount || 0,
+              reportCount: data.reportCount || 0,
+              isSeed: Boolean(data.isSeed)
+            };
+          });
+
+          return sortNotesByActivity(all.filter((note) =>
+            note.reportCount < 3 || note.authorUid === currentUserId
+          ));
+        })(), 12000, "紙條載入逾時");
       } catch (err) {
-        console.warn("[紙條] lastActivityAt 索引尚未建立，改用 createdAt", err);
-        snapshot = await getDocs(
-          query(
-            collection(db, "notes"),
-            orderBy("createdAt", "desc"),
-            limit(MAP_NOTE_LIMIT)
-          )
-        );
+        console.warn("[紙條] 載入失敗", err);
+        throw err;
       }
-
-      const [pickCounts] = await Promise.all([
-        loadPickCountsByNoteId()
-      ]);
-
-      const all = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        const imageUrls = Array.isArray(data.imageUrls) && data.imageUrls.length
-          ? data.imageUrls.filter(Boolean).slice(0, MAX_IMAGES_PER_NOTE)
-          : (data.imageUrl ? [data.imageUrl] : []);
-        const createdAt = data.createdAt?.toDate?.().toISOString() || new Date().toISOString();
-        const lastActivityAt = data.lastActivityAt?.toDate?.().toISOString()
-          || data.lastDriftAt?.toDate?.().toISOString()
-          || createdAt;
-        return {
-          id: doc.id,
-          authorUid: data.authorUid,
-          type: data.type,
-          content: data.content,
-          imageUrl: imageUrls[0] || "",
-          imageUrls,
-          location: {
-            lat: data.location.latitude,
-            lng: data.location.longitude
-          },
-          city: data.city,
-          createdAt,
-          lastActivityAt,
-          expiresAt: data.expiresAt?.toDate?.().toISOString() || addDays(new Date(), 30).toISOString(),
-          pickedCount: pickCounts[doc.id] ?? (data.pickedCount || 0),
-          replyCount: data.replyCount || 0,
-          reportCount: data.reportCount || 0,
-          isSeed: Boolean(data.isSeed)
-        };
-      });
-
-      // 過濾掉被檢舉 3 次以上的紙條
-      // 例外：自己丟的還是看得到（讓使用者知道自己被檢舉了）
-      return sortNotesByActivity(all.filter((note) =>
-        note.reportCount < 3 || note.authorUid === currentUserId
-      ));
     }
 
     // === 檢舉紙條：用 array 記錄誰檢舉過，避免重複檢舉 ===
