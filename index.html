@@ -388,7 +388,7 @@
       <button id="locateButton" class="icon-button" type="button" title="定位">⌖</button>
     </div>
 
-    <div id="nearbyAlert" class="alert">附近有 0 張紙條</div>
+    <button id="nearbyAlert" class="alert" type="button">附近有 0 張紙條，點我撿起</button>
     <div id="toast" class="toast"></div>
 
     <section id="throwSheet" class="sheet" aria-label="丟紙條">
@@ -562,6 +562,7 @@
     els.openThrowButton.addEventListener("click", () => openSheet("throw"));
     els.myNotesButton.addEventListener("click", showMyNotes);
     els.backButton.addEventListener("click", () => els.myNotesPage.classList.remove("open"));
+    els.nearbyAlert.addEventListener("click", pickNearestNote);
     document.querySelectorAll("[data-close]").forEach((button) => {
       button.addEventListener("click", closeSheets);
     });
@@ -712,11 +713,28 @@
 
       const nearby = notes.filter((note) => distanceMeters(currentLocation, note.location) <= 50);
       if (nearby.length > 0) {
-        els.nearbyAlert.textContent = `附近有 ${nearby.length} 張紙條`;
+        els.nearbyAlert.textContent = `附近有 ${nearby.length} 張紙條，點我撿起`;
         els.nearbyAlert.classList.add("show");
       } else {
         els.nearbyAlert.classList.remove("show");
       }
+    }
+
+    function pickNearestNote() {
+      const nearest = notes
+        .map((note) => ({
+          note,
+          distance: distanceMeters(currentLocation, note.location)
+        }))
+        .filter((item) => item.distance <= 50)
+        .sort((a, b) => a.distance - b.distance)[0];
+
+      if (!nearest) {
+        showToast("50 公尺內暫時沒有紙條");
+        return;
+      }
+
+      pickNote(nearest.note);
     }
 
     async function pickNote(note) {
