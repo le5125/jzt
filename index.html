@@ -1350,7 +1350,7 @@
     <!-- 附近紙條列表抽屜 -->
     <section id="nearbySheet" class="sheet" aria-label="附近紙條">
       <header class="sheet-header">
-        <h2>附近的紙條</h2>
+        <h2>全台紙條</h2>
         <button class="close-button" type="button" data-close>×</button>
       </header>
       <div id="nearbyList" class="note-list"></div>
@@ -1492,6 +1492,15 @@
       return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
+    function withTimeout(promise, ms, message) {
+      return Promise.race([
+        promise,
+        delay(ms).then(() => {
+          throw new Error(message || "操作逾時，請稍後再試");
+        })
+      ]);
+    }
+
     let hasFirebase = Boolean(
       firebaseConfig.apiKey &&
       firebaseConfig.authDomain &&
@@ -1583,7 +1592,7 @@
     let selectedNote = null;
     let selectedReplies = [];
     let currentFilter = "all";
-    const NEARBY_RADIUS_METERS = 1000;
+    const NEARBY_RADIUS_METERS = 1000;  // 僅用於「附近提示」與一鍵撿最近的紙條
     let markersLayer = null;
     let userMarker = null;
 
@@ -1790,10 +1799,7 @@
       if (!markersLayer) return;
       notes = loadDemoNotes();
       els.cityText.textContent = currentCity;
-      const nearbyCount = notes.filter((note) =>
-        distanceMeters(currentLocation, note.location) <= NEARBY_RADIUS_METERS
-      ).length;
-      if (!hasFirebase && nearbyCount === 0) {
+      if (!hasFirebase && notes.length === 0) {
         notes = [...seedNotes(currentLocation, currentCity), ...notes];
       }
       renderNotes();
@@ -2017,19 +2023,28 @@
       };
 
       try {
-        // 加上「處理中」狀態，避免使用者以為按鈕沒反應
         els.submitNoteButton.disabled = true;
-        els.submitNoteButton.textContent = "處理中…";
+        els.submitNoteButton.textContent = "壓縮圖片…";
 
         if (imageFile) {
-          note.imageUrl = await uploadNoteImage(imageFile);
+          note.imageUrl = await withTimeout(
+            uploadNoteImage(imageFile),
+            20000,
+            "圖片處理逾時，請換小一點的圖或改用 JPG"
+          );
           if (!note.content) note.content = "圖片紙條";
         }
-        await saveNote(note);
-        notes.unshift(note);
-        saveDemoNotes();
 
-        // 更新今日扔紙條次數
+        els.submitNoteButton.textContent = "上傳中…";
+        await withTimeout(
+          saveNote(note),
+          25000,
+          "上傳逾時，請檢查網路後再試"
+        );
+
+        notes.unshift(note);
+        if (!hasFirebase) saveDemoNotes();
+
         localStorage.setItem("jzt_daily_usage", JSON.stringify({
           date: today,
           count: todayCount + 1
@@ -2041,7 +2056,6 @@
         els.imagePreview.hidden = true;
         els.imagePreview.removeAttribute("src");
         els.countText.textContent = "140 字";
-        els.submitNoteButton.textContent = "扔出去";
         closeSheets();
         renderNotes();
         const remaining = DAILY_LIMIT - todayCount - 1;
@@ -2050,8 +2064,9 @@
         console.error("[扔紙條失敗]", error);
         const msg = error?.message || "未知錯誤";
         showToast(`扔失敗：${msg}`);
+      } finally {
         els.submitNoteButton.textContent = "扔出去";
-        els.submitNoteButton.disabled = false;
+        updateThrowButton();
       }
     });
 
@@ -2177,15 +2192,14 @@
     }
 
     function showNearbyList() {
-      const sorted = notes
+      const sorted = applyFilter(notes)
         .map((note) => ({ note, distance: distanceMeters(currentLocation, note.location) }))
-        .filter((item) => item.distance <= NEARBY_RADIUS_METERS)
         .sort((a, b) => a.distance - b.distance)
-        .slice(0, 30);
+        .slice(0, 50);
 
       els.nearbyList.innerHTML = "";
       if (sorted.length === 0) {
-        els.nearbyList.innerHTML = '<p class="muted">這個區域還沒有紙條。</p>';
+        els.nearbyList.innerHTML = '<p class="muted">全台還沒有紙條。</p>';
       } else {
         sorted.forEach(({ note, distance }) => {
           const isMine = note.authorUid === currentUserId;
@@ -2209,7 +2223,7 @@
           const meta = document.createElement("span");
           meta.className = "muted";
           const distText = distance < 1000 ? `${Math.round(distance)} 公尺` : `${(distance / 1000).toFixed(1)} 公里`;
-          meta.textContent = `${isMine ? "📜 我的" : "📃 " + nicknameOf(note.authorUid)} · ${distText} · 被撿起 ${note.pickedCount} 次`;
+          meta.textContent = `${isMine ? "📜 我的" : "📃 " + nicknameOf(note.authorUid)} · ${note.city || "—"} · ${distText} · 被撿起 ${note.pickedCount} 次`;
           card.appendChild(meta);
 
           card.addEventListener("click", () => {
@@ -2279,8 +2293,7 @@
         notes = loadDemoNotes();
       }
 
-      const nearbyCount = notes.filter((note) => distanceMeters(currentLocation, note.location) <= NEARBY_RADIUS_METERS).length;
-      if (!hasFirebase && nearbyCount === 0) {
+      if (!hasFirebase && notes.length === 0) {
         notes = [...seedNotes(currentLocation, currentCity), ...notes];
       }
 
@@ -2290,11 +2303,8 @@
     function renderNotes() {
       markersLayer.clearLayers();
 
-      // 套用使用者選的篩選器
-      const visibleNotes = applyFilter(notes).filter((note) =>
-        distanceMeters(currentLocation, note.location) <= NEARBY_RADIUS_METERS ||
-        note.authorUid === currentUserId
-      );
+      // 全台紙條都顯示；篩選器只決定顯示誰的
+      const visibleNotes = applyFilter(notes);
 
       visibleNotes.forEach((note) => {
         const isMine = note.authorUid === currentUserId;
@@ -2591,6 +2601,16 @@
 
     async function saveNote(note) {
       if (!hasFirebase) return;
+
+      const { authModule } = firebaseApi;
+      if (!auth.currentUser) {
+        await withTimeout(
+          authModule.signInAnonymously(auth),
+          8000,
+          "登入逾時，請重新整理後再試"
+        );
+      }
+
       const {
         addDoc,
         collection,
@@ -2627,43 +2647,78 @@
      *   - 一般手機照片壓完約 80-200KB
      */
     async function uploadNoteImage(file) {
-      const dataUrl = await compressImageToDataUrl(file, 1024, 0.75);
-      const sizeKb = Math.round(dataUrl.length * 0.75 / 1024);  // base64 約 4/3 倍
+      const unsupported = /heic|heif/i.test(file.type || file.name || "");
+      if (unsupported) {
+        throw new Error("HEIC 格式不支援，請在相簿選「相容格式」或改用 JPG");
+      }
+
+      const dataUrl = await compressImageToDataUrl(file, 800, 0.68);
+      const sizeKb = Math.round(dataUrl.length * 0.75 / 1024);
       console.log(`[圖片] 壓縮後約 ${sizeKb} KB`);
 
-      // Firestore 限制 1MB，留點餘裕，超過 800KB 拒絕
-      if (dataUrl.length > 800 * 1024) {
-        throw new Error(`圖片壓縮後仍太大（${sizeKb} KB），請換一張`);
+      if (dataUrl.length > 700 * 1024) {
+        throw new Error(`圖片壓縮後仍太大（${sizeKb} KB），請換一張較小的圖`);
       }
       return dataUrl;
     }
 
-    function compressImageToDataUrl(file, maxSide = 1024, quality = 0.75) {
+    async function compressImageToDataUrl(file, maxSide = 800, quality = 0.68) {
+      if (typeof createImageBitmap === "function") {
+        try {
+          const bitmap = await createImageBitmap(file);
+          const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+          const width = Math.max(1, Math.round(bitmap.width * scale));
+          const height = Math.max(1, Math.round(bitmap.height * scale));
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(bitmap, 0, 0, width, height);
+          bitmap.close?.();
+          return canvas.toDataURL("image/jpeg", quality);
+        } catch (err) {
+          console.warn("[圖片] createImageBitmap 失敗，改用傳統方式", err);
+        }
+      }
+
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onerror = reject;
+        const timer = setTimeout(() => {
+          reject(new Error("讀取圖片逾時，請換一張較小的圖"));
+        }, 15000);
+
+        reader.onerror = () => {
+          clearTimeout(timer);
+          reject(new Error("無法讀取圖片"));
+        };
         reader.onload = () => {
           const img = new Image();
-          img.onerror = reject;
+          img.onerror = () => {
+            clearTimeout(timer);
+            reject(new Error("圖片格式不支援，請改用 JPG 或 PNG"));
+          };
           img.onload = () => {
-            let { width, height } = img;
-            // 等比縮到最長邊不超過 maxSide
-            if (width > maxSide || height > maxSide) {
-              if (width > height) {
-                height = Math.round(height * maxSide / width);
-                width = maxSide;
-              } else {
-                width = Math.round(width * maxSide / height);
-                height = maxSide;
+            clearTimeout(timer);
+            try {
+              let { width, height } = img;
+              if (width > maxSide || height > maxSide) {
+                if (width > height) {
+                  height = Math.round(height * maxSide / width);
+                  width = maxSide;
+                } else {
+                  width = Math.round(width * maxSide / height);
+                  height = maxSide;
+                }
               }
+              const canvas = document.createElement("canvas");
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext("2d");
+              ctx.drawImage(img, 0, 0, width, height);
+              resolve(canvas.toDataURL("image/jpeg", quality));
+            } catch (err) {
+              reject(new Error("圖片壓縮失敗，請換一張"));
             }
-            const canvas = document.createElement("canvas");
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext("2d");
-            ctx.drawImage(img, 0, 0, width, height);
-            const dataUrl = canvas.toDataURL("image/jpeg", quality);
-            resolve(dataUrl);
           };
           img.src = reader.result;
         };
