@@ -1909,6 +1909,10 @@
     let selectedNote = null;
     let sheetReturnContext = null;
     let selectedReplies = [];
+    let repliesCache = new Map();
+    let repliesUnsubscribe = null;
+    let repliesListenerNoteId = null;
+    let repliesListenerToken = 0;
     let currentFilter = "all";
     const NEARBY_RADIUS_METERS = 1000;  // 僅用於「附近提示」與一鍵撿最近的紙條
     let markersLayer = null;
@@ -2977,6 +2981,7 @@
     function closeSheets(except) {
       closeReplyComposeDrawer();
       if (except !== "pick" && except !== "replies") {
+        stopRepliesListener();
         clearPickReturnContext();
       }
       const keep = typeof except === "string" ? except : null;
@@ -3285,9 +3290,10 @@
       selectedReplies = [];
       updateReplyEntryCount();
       updateReplySubmitState();
+      startRepliesListener(note);
 
       try {
-        const pickTask = (async () => {
+        const count = await (async () => {
           if (!isOwn && note.authorUid !== "seed") {
             try {
               await recordNotePick(note);
@@ -3297,20 +3303,11 @@
           }
           return syncPickCount(note);
         })();
-
-        const [count, replies] = await Promise.all([
-          pickTask,
-          loadReplies(note)
-        ]);
-        selectedReplies = replies;
         els.pickedCount.textContent = `${count} 次`;
-        updateReplyEntryCount();
       } catch (err) {
-        console.error("[回覆] 載入失敗", err);
-        selectedReplies = [];
+        console.error("[撿取] 次數載入失敗", err);
         const count = await syncPickCount(note);
         els.pickedCount.textContent = `${count} 次`;
-        updateReplyEntryCount();
       }
     }
 
@@ -3318,15 +3315,17 @@
       if (!selectedNote) return;
       closeReplyComposeDrawer();
       openSheet("replies");
-      els.replyList.innerHTML = '<p class="muted">載入回覆中…</p>';
-      try {
-        selectedReplies = await loadReplies(selectedNote);
-      } catch (err) {
-        console.error("[回覆] 載入失敗", err);
-        selectedReplies = [];
+
+      if (selectedReplies.length || repliesCache.has(selectedNote.id)) {
+        renderReplies();
+        updateReplyEntryCount();
+      } else {
+        els.replyList.innerHTML = '<p class="muted">載入回覆中…</p>';
       }
-      updateReplyEntryCount();
+
+      await startRepliesListener(selectedNote);
       renderReplies();
+      updateReplyEntryCount();
     }
 
     function updateReplyEntryCount() {
@@ -3358,9 +3357,13 @@
         createdAt: new Date().toISOString()
       };
 
+      selectedReplies.unshift(newReply);
+      repliesCache.set(selectedNote.id, [...selectedReplies]);
+      updateReplyEntryCount();
+      renderReplies();
+
       try {
         await saveReply(selectedNote, newReply);
-        selectedReplies.unshift(newReply);
         selectedNote.replyCount = (selectedNote.replyCount || 0) + 1;
         selectedNote.lastActivityAt = newReply.createdAt;
         const noteIndex = notes.findIndex((item) => item.id === selectedNote.id);
@@ -3378,6 +3381,10 @@
         showToast("已送出回覆");
       } catch (error) {
         console.error("[回覆] 送出失敗", error);
+        selectedReplies = selectedReplies.filter((item) => item.id !== newReply.id);
+        repliesCache.set(selectedNote.id, [...selectedReplies]);
+        renderReplies();
+        updateReplyEntryCount();
         showToast(error?.message?.includes("逾時") ? error.message : "回覆失敗，請稍後再試");
       } finally {
         replyingInProgress = false;
@@ -3875,44 +3882,118 @@
       }
     }
 
-    async function loadReplies(note) {
-      if (!hasFirebase || note.id.startsWith("seed-")) {
-        const key = `jzt_replies_${note.id}`;
-        return JSON.parse(localStorage.getItem(key) || "[]");
+    function mapReplyDoc(doc) {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        authorUid: data.authorUid,
+        type: data.type,
+        content: data.content,
+        createdAt: data.createdAt?.toDate?.().toISOString() || new Date().toISOString()
+      };
+    }
+
+    function sortReplies(replies) {
+      return [...replies].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    }
+
+    function stopRepliesListener() {
+      repliesListenerToken++;
+      if (repliesUnsubscribe) {
+        repliesUnsubscribe();
+        repliesUnsubscribe = null;
+      }
+      repliesListenerNoteId = null;
+    }
+
+    function applyRepliesForNote(noteId, replies) {
+      const sorted = sortReplies(replies);
+      repliesCache.set(noteId, sorted);
+      if (selectedNote?.id !== noteId) return;
+      selectedReplies = sorted;
+      updateReplyEntryCount();
+      if (els.replySheet?.classList.contains("open")) {
+        renderReplies();
+      }
+    }
+
+    async function startRepliesListener(note) {
+      if (!note?.id) return;
+
+      if (repliesListenerNoteId === note.id && repliesUnsubscribe) {
+        if (repliesCache.has(note.id)) {
+          applyRepliesForNote(note.id, repliesCache.get(note.id));
+        }
+        return;
+      }
+
+      stopRepliesListener();
+      const noteId = note.id;
+      repliesListenerNoteId = noteId;
+      const token = repliesListenerToken;
+
+      if (repliesCache.has(noteId)) {
+        applyRepliesForNote(noteId, repliesCache.get(noteId));
+      }
+
+      if (!hasFirebase || noteId.startsWith("seed-")) {
+        const local = JSON.parse(localStorage.getItem(`jzt_replies_${noteId}`) || "[]");
+        applyRepliesForNote(noteId, local);
+        return;
       }
 
       try {
-        return await withTimeout((async () => {
-          const {
-            collection,
-            getDocs,
-            limit,
-            orderBy,
-            query
-          } = firebaseApi.firestoreModule;
+        await ensureAuth();
+      } catch (err) {
+        console.warn("[回覆] 登入失敗", err);
+        return;
+      }
+      if (token !== repliesListenerToken) return;
 
+      const { collection, onSnapshot, query, limit } = firebaseApi.firestoreModule;
+      const q = query(collection(db, "notes", noteId, "replies"), limit(50));
+
+      repliesUnsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          if (token !== repliesListenerToken) return;
+          applyRepliesForNote(noteId, snapshot.docs.map(mapReplyDoc));
+        },
+        (err) => {
+          if (token !== repliesListenerToken) return;
+          console.warn("[回覆] 即時監聽失敗，改單次載入", err);
+          loadReplies(note).then((replies) => applyRepliesForNote(noteId, replies));
+        }
+      );
+    }
+
+    async function loadReplies(note) {
+      if (!note?.id) return [];
+
+      if (repliesCache.has(note.id)) {
+        return repliesCache.get(note.id);
+      }
+
+      if (!hasFirebase || note.id.startsWith("seed-")) {
+        const key = `jzt_replies_${note.id}`;
+        const local = JSON.parse(localStorage.getItem(key) || "[]");
+        repliesCache.set(note.id, sortReplies(local));
+        return repliesCache.get(note.id);
+      }
+
+      try {
+        const replies = await withTimeout((async () => {
+          const { collection, getDocs, limit, query } = firebaseApi.firestoreModule;
           const snapshot = await getDocs(
-            query(
-              collection(db, "notes", note.id, "replies"),
-              orderBy("createdAt", "desc"),
-              limit(30)
-            )
+            query(collection(db, "notes", note.id, "replies"), limit(50))
           );
-
-          return snapshot.docs.map((doc) => {
-            const data = doc.data();
-            return {
-              id: doc.id,
-              authorUid: data.authorUid,
-              type: data.type,
-              content: data.content,
-              createdAt: data.createdAt?.toDate?.().toISOString() || new Date().toISOString()
-            };
-          });
-        })(), 8000, "回覆載入逾時");
+          return sortReplies(snapshot.docs.map(mapReplyDoc));
+        })(), 6000, "回覆載入逾時");
+        repliesCache.set(note.id, replies);
+        return replies;
       } catch (err) {
         console.warn("[回覆] 載入失敗", err);
-        return [];
+        return repliesCache.get(note.id) || [];
       }
     }
 
