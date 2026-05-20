@@ -572,11 +572,19 @@
     .sheet.open {
       z-index: 1000;
       transform: translateY(0) !important;
+      pointer-events: auto;
     }
 
-    /* 抽屜開啟時地圖不攔點擊 */
-    #app.has-sheet-open #map {
+    /* 抽屜開啟時地圖、底欄、提示不攔點擊 */
+    #app.has-sheet-open #map,
+    #app.has-sheet-open .bottom-bar,
+    #app.has-sheet-open .alert {
       pointer-events: none;
+    }
+
+    #pickSheet {
+      max-height: min(88vh, 680px);
+      padding-bottom: calc(120px + env(safe-area-inset-bottom));
     }
 
     /* 高版抽屜：用於「我的紙條」這種內容多的，撐到接近全螢幕 */
@@ -953,6 +961,9 @@
       font-size: 26px;
       box-shadow: 2px 3px 0 var(--ink);
       transition: transform 0.12s ease, box-shadow 0.15s ease;
+      pointer-events: auto;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
     }
     .sticker-button:nth-child(odd) { transform: rotate(-3deg); }
     .sticker-button:nth-child(even) { transform: rotate(3deg); }
@@ -1647,10 +1658,11 @@
         db = firestoreModule.getFirestore(app);
         firebaseApi = { authModule, firestoreModule, storageModule: null, storage: null };
 
-        await Promise.race([
+        await withTimeout(
           authModule.signInAnonymously(auth),
-          delay(4000)
-        ]);
+          8000,
+          "Firebase 匿名登入逾時"
+        ).catch((err) => console.warn("[Firebase] 匿名登入失敗", err));
       } catch (err) {
         console.error("[Firebase] 初始化失敗，改用本機模式", err);
         hasFirebase = false;
@@ -1659,6 +1671,10 @@
         auth = null;
       }
     }
+
+    let myNotesRequestId = 0;
+    let replyingInProgress = false;
+    let notesRefreshPromise = null;
 
     function getRegisteredAuthorUids() {
       try {
@@ -1699,6 +1715,27 @@
       registerAuthorUid(currentUserId);
       localStorage.setItem("jzt_demo_uid", currentUserId);
       restoreLastLocation();
+      if (!notes.length) applyNotesCache();
+    }
+
+    async function ensureAuth() {
+      if (!hasFirebase || auth?.currentUser) return;
+      const { authModule } = firebaseApi;
+      await withTimeout(
+        authModule.signInAnonymously(auth),
+        8000,
+        "登入逾時，請重新整理後再試"
+      );
+      applyAuthIdentity();
+    }
+
+    function eventTargetElement(target) {
+      return target instanceof Element ? target : target?.parentElement ?? null;
+    }
+
+    function updateReplySubmitState() {
+      const hasText = els.replyInput.value.trim().length > 0;
+      els.submitReplyButton.disabled = !hasText || replyingInProgress;
     }
 
     function restoreLastLocation() {
@@ -1988,6 +2025,54 @@
         .slice(0, MAP_NOTE_LIMIT);
     }
 
+    function cloneNotes(list) {
+      return list.map((note) => ({ ...note }));
+    }
+
+    function getNotesSnapshot() {
+      if (notes.length) return cloneNotes(notes);
+      const cached = loadNotesCache();
+      return cached ? cloneNotes(cached) : [];
+    }
+
+    function mergeNotesById(primary, secondary) {
+      const map = new Map();
+      secondary.forEach((note) => map.set(note.id, note));
+      primary.forEach((note) => map.set(note.id, note));
+      return sortNotesByActivity([...map.values()]);
+    }
+
+    /** Firebase 有資料就合併更新；沒有就保留現有／快取，絕不無故清空 */
+    function applyNotesOrKeep(freshNotes, fallbackNotes) {
+      if (freshNotes.length > 0) {
+        notes = fallbackNotes.length
+          ? mergeNotesById(freshNotes, fallbackNotes)
+          : sortNotesByActivity(freshNotes);
+        saveNotesCache();
+        return true;
+      }
+      if (fallbackNotes.length > 0) {
+        notes = fallbackNotes;
+        return true;
+      }
+      if (notes.length > 0) return true;
+      return applyNotesCache();
+    }
+
+    async function ensureNotesLoaded() {
+      if (notes.length) return;
+      applyNotesCache();
+      if (notes.length) return;
+      if (!hasFirebase) {
+        notes = loadDemoNotes();
+        if (!notes.length) {
+          notes = [...seedNotes(currentLocation, currentCity), ...notes];
+        }
+        return;
+      }
+      await refreshNotes({ background: true });
+    }
+
     function noteHasImage(note) {
       return getNoteImageUrls(note).length > 0;
     }
@@ -2078,7 +2163,7 @@
         try {
           updateThrowRemainingLabel();
           if (markersLayer) {
-            if (!notes.length && hasFirebase) {
+            if (!notes.length) {
               applyNotesCache();
             }
             renderNotes();
@@ -2108,9 +2193,13 @@
 
         applyAuthIdentity();
         loadPickedNotesLocal();
-        const hadCache = hasFirebase && applyNotesCache();
+        if (!notes.length) {
+          applyNotesCache();
+        }
+        const hadCache = notes.length > 0;
         if (hadCache) {
           els.cityText.textContent = currentCity;
+          renderNotes();
         }
 
         await Promise.race([
@@ -2119,15 +2208,12 @@
             Promise.race([preloadImage("paper_ball.png"), delay(600)]).catch(() => {}),
             Promise.race([bootTileReady, delay(2500)]),
             hasFirebase
-              ? Promise.race([
-                  refreshNotes({ background: hadCache }),
-                  delay(hadCache ? 2000 : 3500)
-                ])
-              : (async () => {
-                  renderInitialNotes();
-                })()
+              ? refreshNotes({ background: hadCache }).catch((err) => {
+                  console.warn("[開場] 紙條載入失敗，沿用快取", err);
+                })
+              : Promise.resolve(renderInitialNotes())
           ]),
-          delay(4000)
+          delay(8000)
         ]);
       } catch (err) {
         console.warn("[開場] 資源等待失敗", err);
@@ -2182,22 +2268,25 @@
     els.replyInput.addEventListener("input", () => {
       const left = 140 - els.replyInput.value.length;
       els.replyCountText.textContent = `${left} 字`;
-      els.submitReplyButton.disabled = els.replyInput.value.trim().length === 0;
+      updateReplySubmitState();
     });
+    els.replyInput.addEventListener("compositionend", updateReplySubmitState);
     els.replyForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const content = els.replyInput.value.trim().slice(0, 140);
-      if (!content || !selectedNote) return;
+      if (!content || !selectedNote || replyingInProgress) return;
       await submitReply({ type: "text", content });
       els.replyInput.value = "";
       els.replyCountText.textContent = "140 字";
-      els.submitReplyButton.disabled = true;
+      updateReplySubmitState();
     });
-    els.stickerRow.addEventListener("click", async (event) => {
-      const button = event.target.closest("[data-sticker]");
-      if (!button || !selectedNote) return;
+    async function handleStickerPick(event) {
+      const button = eventTargetElement(event.target)?.closest("[data-sticker]");
+      if (!button || !selectedNote || replyingInProgress) return;
+      event.preventDefault();
       await submitReply({ type: "sticker", content: button.dataset.sticker });
-    });
+    }
+    els.stickerRow.addEventListener("click", handleStickerPick);
 
     // === 分享紙條給 LINE 朋友 ===
     els.shareNoteButton.addEventListener("click", async () => {
@@ -2383,6 +2472,7 @@
         notes.unshift(note);
         notes = sortNotesByActivity(notes);
         if (!hasFirebase) saveDemoNotes();
+        saveNotesCache();
 
         saveDailyUsage({
           date: today,
@@ -2459,8 +2549,6 @@
         container.appendChild(img);
       });
     }
-
-    let myNotesLoading = false;
 
     function resetSheetVisual(sheet) {
       if (!sheet) return;
@@ -2569,7 +2657,8 @@
       openSheet("nearby");
       els.nearbyList.innerHTML = '<p class="muted">載入中…</p>';
 
-      const sorted = applyFilter(notes)
+      ensureNotesLoaded().then(() => {
+        const sorted = applyFilter(notes)
         .map((note) => ({ note, distance: distanceMeters(currentLocation, note.location) }))
         .sort((a, b) => a.distance - b.distance)
         .slice(0, 50);
@@ -2605,6 +2694,7 @@
           els.nearbyList.appendChild(card);
         });
       }
+      });
     }
 
     function locateMe(options = {}) {
@@ -2652,35 +2742,36 @@
     }
 
     async function refreshNotes(options = {}) {
+      if (notesRefreshPromise) return notesRefreshPromise;
+      notesRefreshPromise = refreshNotesImpl(options).finally(() => {
+        notesRefreshPromise = null;
+      });
+      return notesRefreshPromise;
+    }
+
+    async function refreshNotesImpl(options = {}) {
       const { background = false } = options;
-      const backup = notes.length ? notes.map((note) => ({ ...note })) : null;
+      const snapshot = getNotesSnapshot();
       els.cityText.textContent = currentCity;
 
       try {
         if (hasFirebase) {
+          await ensureAuth();
           const loaded = await loadFirebaseNotes();
-          if (loaded.length > 0) {
-            notes = loaded;
-            saveNotesCache();
-          } else if (backup?.length) {
-            notes = backup;
-            console.warn(`[紙條] Firebase 回傳空，保留原本 ${backup.length} 張`);
-          } else if (!applyNotesCache()) {
-            notes = [];
-          }
+          applyNotesOrKeep(loaded, snapshot);
         } else {
           notes = loadDemoNotes();
+          if (!notes.length) {
+            notes = [...seedNotes(currentLocation, currentCity), ...notes];
+          }
         }
       } catch (error) {
-        console.error(error);
-        if (backup?.length) {
-          notes = backup;
-        } else if (!applyNotesCache()) {
-          notes = [];
+        console.error("[紙條] 刷新失敗", error);
+        if (!applyNotesOrKeep([], snapshot) && !background) {
+          showToast("讀取失敗，顯示快取紙條");
         }
-        if (!background && !notes.length) {
-          showToast("Firebase 讀取失敗，先顯示測試紙條");
-          notes = loadDemoNotes();
+        if (!hasFirebase && !notes.length) {
+          notes = [...seedNotes(currentLocation, currentCity), ...loadDemoNotes()];
         }
       }
 
@@ -2689,6 +2780,7 @@
       }
 
       notes = sortNotesByActivity(notes);
+      if (notes.length) saveNotesCache();
       renderNotes();
       updateReplyAlert();
     }
@@ -2790,6 +2882,7 @@
       updatePickedTimes(note);
       selectedReplies = [];
       els.replyList.innerHTML = '<p class="muted">載入回覆中…</p>';
+      updateReplySubmitState();
 
       if (!isOwn && note.authorUid !== "seed") {
         recordNotePick(note).catch((err) => {
@@ -2816,7 +2909,13 @@
     }
 
     async function submitReply(reply) {
-      if (!selectedNote) return;
+      if (!selectedNote || replyingInProgress) return;
+
+      replyingInProgress = true;
+      updateReplySubmitState();
+      const prevSubmitLabel = els.submitReplyButton.textContent;
+      els.submitReplyButton.textContent = "送出中…";
+
       const newReply = {
         id: crypto.randomUUID(),
         authorUid: currentUserId,
@@ -2843,8 +2942,12 @@
         updateReplyAlert();
         showToast("已送出回覆");
       } catch (error) {
-        console.error(error);
-        showToast("回覆失敗，請檢查 Firebase 規則");
+        console.error("[回覆] 送出失敗", error);
+        showToast(error?.message?.includes("逾時") ? error.message : "回覆失敗，請稍後再試");
+      } finally {
+        replyingInProgress = false;
+        els.submitReplyButton.textContent = prevSubmitLabel;
+        updateReplySubmitState();
       }
     }
 
@@ -2871,19 +2974,23 @@
 
     async function showMyNotes(options = {}) {
       const { repliesOnly = false } = options;
+      const requestId = ++myNotesRequestId;
 
       openSheet("myNotes");
-      if (myNotesLoading) return;
-
-      myNotesLoading = true;
       els.myNotesTitle.textContent = repliesOnly ? "有回覆的紙條" : "我的紙條";
       els.myNickname.textContent = `你是「${nicknameOf(currentUserId)}」`;
       els.myNotesList.innerHTML = '<p class="muted">載入中…</p>';
 
       try {
-        const mine = notes.filter(isMyNote);
-        els.myNotesList.innerHTML = "";
+        await ensureNotesLoaded();
+        if (requestId !== myNotesRequestId) return;
 
+        let mine = notes.filter(isMyNote);
+        if (repliesOnly) {
+          mine = mine.filter((note) => (note.replyCount || 0) > 0);
+        }
+
+        els.myNotesList.innerHTML = "";
         if (!mine.length) {
           els.myNotesList.innerHTML = repliesOnly
             ? '<p class="muted">目前還沒有人回覆你的紙條。</p>'
@@ -2892,36 +2999,55 @@
           return;
         }
 
-        const replyResults = await Promise.allSettled(
-          mine.map((note) => loadReplies(note))
+        const cardByNoteId = new Map();
+        mine.forEach((note) => {
+          const card = renderMyNoteCard(note, null);
+          cardByNoteId.set(note.id, card);
+          els.myNotesList.appendChild(card);
+        });
+
+        await Promise.allSettled(
+          mine.map(async (note) => {
+            const replies = await loadReplies(note);
+            if (requestId !== myNotesRequestId) return;
+            const card = cardByNoteId.get(note.id);
+            if (!card) return;
+            markNoteRepliesSeen(note.id, note.replyCount || replies.length);
+            updateMyNoteCardReplies(card, note, replies);
+          })
         );
-        const pairs = mine.map((note, i) => ({
-          note,
-          replies: replyResults[i].status === "fulfilled" ? replyResults[i].value : []
-        }));
 
-        const toRender = repliesOnly
-          ? pairs.filter(({ replies }) => replies.length > 0)
-          : pairs;
-
-        if (!toRender.length) {
-          els.myNotesList.innerHTML = '<p class="muted">目前還沒有人回覆你的紙條。</p>';
-          updateReplyAlert();
-          return;
-        }
-
-        for (const { note, replies } of toRender) {
-          markNoteRepliesSeen(note.id, note.replyCount || replies.length);
-          renderMyNoteCard(note, replies);
-        }
-
+        if (requestId !== myNotesRequestId) return;
         updateReplyAlert();
       } catch (err) {
         console.error("[我的紙條] 載入失敗", err);
+        if (requestId !== myNotesRequestId) return;
         els.myNotesList.innerHTML = '<p class="muted">載入失敗，請稍後再試。</p>';
-      } finally {
-        myNotesLoading = false;
       }
+    }
+
+    function updateMyNoteCardReplies(card, note, replies) {
+      const replyBox = card.querySelector(".reply-list");
+      const meta = card.querySelector(".note-card-meta");
+      if (meta) {
+        meta.textContent = `${note.city} · 被撿起 ${note.pickedCount} 次 · 回覆 ${replies.length} 則 · ${formatNoteTimesMeta(note)}`;
+      }
+      if (!replyBox) return;
+      replyBox.innerHTML = "";
+      if (!replies.length) {
+        replyBox.innerHTML = '<p class="muted">還沒有回覆。</p>';
+        return;
+      }
+      replies.forEach((reply) => {
+        const replyCard = document.createElement("article");
+        replyCard.className = "reply-card";
+        const replyText = document.createElement("p");
+        replyText.textContent = reply.content;
+        const replyTime = document.createElement("small");
+        replyTime.textContent = new Date(reply.createdAt).toLocaleString("zh-TW");
+        replyCard.append(replyText, replyTime);
+        replyBox.appendChild(replyCard);
+      });
     }
 
     function renderMyNoteCard(note, replies) {
@@ -2933,14 +3059,17 @@
       p.textContent = note.content || "圖片紙條";
       body.appendChild(p);
       const meta = document.createElement("span");
-      meta.className = "muted";
-      meta.textContent = `${note.city} · 被撿起 ${note.pickedCount} 次 · 回覆 ${replies.length} 則 · ${formatNoteTimesMeta(note)}`;
+      meta.className = "muted note-card-meta";
+      const replyCount = replies ? replies.length : (note.replyCount || 0);
+      meta.textContent = `${note.city} · 被撿起 ${note.pickedCount} 次 · 回覆 ${replyCount} 則 · ${formatNoteTimesMeta(note)}`;
       body.appendChild(meta);
 
       const replyBox = document.createElement("div");
       replyBox.className = "reply-list";
       replyBox.style.marginTop = "12px";
-      if (!replies.length) {
+      if (replies === null) {
+        replyBox.innerHTML = '<p class="muted">回覆載入中…</p>';
+      } else if (!replies.length) {
         replyBox.innerHTML = '<p class="muted">還沒有回覆。</p>';
       } else {
         replies.forEach((reply) => {
@@ -2981,7 +3110,7 @@
       });
       actions.append(openButton, deleteButton);
       card.append(body, replyBox, actions);
-      els.myNotesList.appendChild(card);
+      return card;
     }
 
     function loadDemoNotes() {
@@ -3031,7 +3160,7 @@
     }
 
     function loadNotesCache() {
-      return loadNotesCacheFrom(notesCacheKey()) || loadNotesCacheFrom("jzt_notes_cache_all");
+      return loadNotesCacheFrom("jzt_notes_cache_all") || loadNotesCacheFrom(notesCacheKey());
     }
 
     function saveNotesCache() {
@@ -3247,14 +3376,16 @@
     }
 
     async function deleteMyNote(note) {
-      notes = notes.filter((item) => item.id !== note.id);
-      saveDemoNotes();
-
-      if (!hasFirebase || note.id.startsWith("seed-")) return;
-      if (note.authorUid !== currentUserId) {
+      if (!isMyNote(note)) {
         showToast("只能刪除自己的紙條");
         return;
       }
+
+      notes = notes.filter((item) => item.id !== note.id);
+      saveDemoNotes();
+      saveNotesCache();
+
+      if (!hasFirebase || note.id.startsWith("seed-")) return;
 
       const { deleteDoc, doc } = firebaseApi.firestoreModule;
       await deleteDoc(doc(db, "notes", note.id));
@@ -3270,6 +3401,8 @@
         return;
       }
 
+      await ensureAuth();
+
       const {
         addDoc,
         collection,
@@ -3279,17 +3412,29 @@
         updateDoc
       } = firebaseApi.firestoreModule;
 
-      await addDoc(collection(db, "notes", note.id, "replies"), {
-        authorUid: currentUserId,
-        type: reply.type,
-        content: reply.content,
-        createdAt: serverTimestamp()
-      });
+      await withTimeout(
+        addDoc(collection(db, "notes", note.id, "replies"), {
+          authorUid: currentUserId,
+          type: reply.type,
+          content: reply.content,
+          createdAt: serverTimestamp()
+        }),
+        10000,
+        "回覆送出逾時，請稍後再試"
+      );
 
-      await updateDoc(doc(db, "notes", note.id), {
-        replyCount: increment(1),
-        lastActivityAt: serverTimestamp()
-      });
+      try {
+        await withTimeout(
+          updateDoc(doc(db, "notes", note.id), {
+            replyCount: increment(1),
+            lastActivityAt: serverTimestamp()
+          }),
+          8000,
+          "回覆計數更新逾時"
+        );
+      } catch (err) {
+        console.warn("[回覆] 計數更新失敗，回覆內容已儲存", err);
+      }
     }
 
     async function loadReplies(note) {
@@ -3406,8 +3551,6 @@
             );
           }
 
-          const pickCounts = await loadPickCountsByNoteId();
-
           const all = snapshot.docs.map((doc) => {
             const data = doc.data();
             const imageUrls = Array.isArray(data.imageUrls) && data.imageUrls.length
@@ -3432,7 +3575,7 @@
               createdAt,
               lastActivityAt,
               expiresAt: data.expiresAt?.toDate?.().toISOString() || addDays(new Date(), 30).toISOString(),
-              pickedCount: pickCounts[doc.id] ?? (data.pickedCount || 0),
+              pickedCount: data.pickedCount || 0,
               replyCount: data.replyCount || 0,
               reportCount: data.reportCount || 0,
               isSeed: Boolean(data.isSeed)
