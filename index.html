@@ -1563,6 +1563,7 @@
     <!-- 撿到紙條抽屜 -->
     <section id="pickSheet" class="sheet" aria-label="撿到紙條">
       <header class="sheet-header">
+        <button id="pickBackButton" class="back-button" type="button" aria-label="返回列表" hidden>←</button>
         <h2>撿到一張紙條</h2>
         <button class="close-button" type="button" data-close>×</button>
       </header>
@@ -1906,6 +1907,7 @@
     restoreLastLocation();
     let notes = [];
     let selectedNote = null;
+    let sheetReturnContext = null;
     let selectedReplies = [];
     let currentFilter = "all";
     const NEARBY_RADIUS_METERS = 1000;  // 僅用於「附近提示」與一鍵撿最近的紙條
@@ -1928,6 +1930,7 @@
       throwRemainingText: document.querySelector("#throwRemainingText"),
       throwSheet: document.querySelector("#throwSheet"),
       pickSheet: document.querySelector("#pickSheet"),
+      pickBackButton: document.querySelector("#pickBackButton"),
       citySheet: document.querySelector("#citySheet"),
       noteInput: document.querySelector("#noteInput"),
       imageInput: document.querySelector("#imageInput"),
@@ -2146,7 +2149,17 @@
     }
 
     function getNoteActivityTime(note) {
-      return note.lastActivityAt || note.createdAt;
+      return note.lastActivityAt || note.lastDriftAt || note.createdAt;
+    }
+
+    /** 有回覆或後續互動才顯示更新時間（丟出當下不算更新） */
+    function getNoteUpdatedTime(note) {
+      if (!note?.lastActivityAt) return null;
+      if ((note.replyCount || 0) > 0) return note.lastActivityAt;
+      const created = new Date(note.createdAt).getTime();
+      const updated = new Date(note.lastActivityAt).getTime();
+      if (!Number.isFinite(created) || !Number.isFinite(updated)) return null;
+      return updated - created > 60000 ? note.lastActivityAt : null;
     }
 
     function formatNoteTime(iso) {
@@ -2161,14 +2174,15 @@
 
     function formatNoteTimesMeta(note) {
       const created = formatNoteTime(note.createdAt);
-      const updated = formatNoteTime(getNoteActivityTime(note));
-      if (created === updated) return `丟出 ${created}`;
-      return `丟出 ${created} · 更新 ${updated}`;
+      const updatedTime = getNoteUpdatedTime(note);
+      if (!updatedTime) return `丟出 ${created}`;
+      return `丟出 ${created} · 更新 ${formatNoteTime(updatedTime)}`;
     }
 
     function updatePickedTimes(note) {
       els.pickedCreatedTime.textContent = formatNoteTime(note.createdAt);
-      els.pickedUpdatedTime.textContent = formatNoteTime(getNoteActivityTime(note));
+      const updatedTime = getNoteUpdatedTime(note);
+      els.pickedUpdatedTime.textContent = updatedTime ? formatNoteTime(updatedTime) : "尚未有更新";
     }
 
     function sortNotesByActivity(noteList) {
@@ -2215,9 +2229,8 @@
         ? data.imageUrls.filter(Boolean).slice(0, MAX_IMAGES_PER_NOTE)
         : (data.imageUrl ? [data.imageUrl] : []);
       const createdAt = data.createdAt?.toDate?.().toISOString() || new Date().toISOString();
-      const lastActivityAt = data.lastActivityAt?.toDate?.().toISOString()
-        || data.lastDriftAt?.toDate?.().toISOString()
-        || createdAt;
+      const lastActivityAt = data.lastActivityAt?.toDate?.().toISOString() || null;
+      const lastDriftAt = data.lastDriftAt?.toDate?.().toISOString() || null;
       const loc = data.location;
       let lat;
       let lng;
@@ -2239,6 +2252,7 @@
         city: data.city,
         createdAt,
         lastActivityAt,
+        lastDriftAt,
         expiresAt: data.expiresAt?.toDate?.().toISOString() || addDays(new Date(), 30).toISOString(),
         pickedCount: data.pickedCount || 0,
         replyCount: data.replyCount || 0,
@@ -2564,6 +2578,7 @@
     els.myNotesButton.addEventListener("click", () => showMyNotes({ repliesOnly: false }));
     els.replyAlert.addEventListener("click", () => showMyNotes({ repliesOnly: true }));
     els.openRepliesButton.addEventListener("click", () => openRepliesSheet());
+    els.pickBackButton.addEventListener("click", () => returnFromPickSheet());
     els.replyBackButton.addEventListener("click", () => {
       closeReplyComposeDrawer();
       if (selectedNote) openSheet("pick");
@@ -2890,6 +2905,56 @@
       document.getElementById("app")?.classList.toggle("has-sheet-open", anyOpen);
     }
 
+    function getSheetScrollEl(sheet) {
+      if (sheet === "nearby") return els.nearbySheet;
+      if (sheet === "myNotes") return els.myNotesPage;
+      return null;
+    }
+
+    function setPickReturnContext(sheet) {
+      const scrollEl = getSheetScrollEl(sheet);
+      sheetReturnContext = {
+        sheet,
+        scrollTop: scrollEl?.scrollTop || 0
+      };
+      updatePickBackButton();
+    }
+
+    function clearPickReturnContext() {
+      sheetReturnContext = null;
+      updatePickBackButton();
+    }
+
+    function updatePickBackButton() {
+      if (!els.pickBackButton) return;
+      const sheet = sheetReturnContext?.sheet;
+      els.pickBackButton.hidden = !sheet;
+      const header = els.pickSheet?.querySelector(".sheet-header");
+      header?.classList.toggle("sheet-header-with-back", Boolean(sheet));
+      if (sheet === "nearby") {
+        els.pickBackButton.setAttribute("aria-label", "返回附近列表");
+      } else if (sheet === "myNotes") {
+        els.pickBackButton.setAttribute("aria-label", "返回我的紙條");
+      }
+    }
+
+    function returnFromPickSheet() {
+      closeReplyComposeDrawer();
+      const ctx = sheetReturnContext;
+      if (!ctx?.sheet) {
+        closeSheets();
+        return;
+      }
+      const { sheet, scrollTop } = ctx;
+      openSheet(sheet);
+      const scrollEl = getSheetScrollEl(sheet);
+      if (scrollEl) {
+        requestAnimationFrame(() => {
+          scrollEl.scrollTop = scrollTop;
+        });
+      }
+    }
+
     function closeReplyComposeDrawer() {
       if (!els.replyComposeDrawer) return;
       els.replyComposeDrawer.classList.remove("open");
@@ -2911,6 +2976,9 @@
 
     function closeSheets(except) {
       closeReplyComposeDrawer();
+      if (except !== "pick" && except !== "replies") {
+        clearPickReturnContext();
+      }
       const keep = typeof except === "string" ? except : null;
       if (keep !== "throw") els.throwSheet.classList.remove("open");
       if (keep !== "pick") els.pickSheet.classList.remove("open");
@@ -3039,7 +3107,7 @@
           card.appendChild(meta);
 
           card.addEventListener("click", () => {
-            closeSheets();
+            setPickReturnContext("nearby");
             pickNote(note);
           });
           els.nearbyList.appendChild(card);
@@ -3148,7 +3216,10 @@
             })
           });
 
-          marker.on("click", () => pickNote(note));
+          marker.on("click", () => {
+            clearPickReturnContext();
+            pickNote(note);
+          });
           marker.addTo(markersLayer);
         } catch (err) {
           console.warn("[地圖] 略過無法顯示的紙條", note?.id, err);
@@ -3168,6 +3239,7 @@
     }
 
     function pickNearestNote() {
+      clearPickReturnContext();
       const nearest = notes
         .filter((note) => !isMyNote(note))
         .map((note) => ({
@@ -3196,6 +3268,7 @@
       const isOwn = isMyNote(note);
 
       openSheet("pick");
+      updatePickBackButton();
       renderPickedNote(note);
       els.pickedAuthor.textContent = isOwn ? `來自我（${nicknameOf(note.authorUid)}）` : `來自 ${nicknameOf(note.authorUid)}`;
       els.pickedAuthor.classList.toggle("mine", isOwn);
@@ -3456,7 +3529,7 @@
       openButton.type = "button";
       openButton.textContent = "打開紙條";
       openButton.addEventListener("click", () => {
-        closeSheets();
+        setPickReturnContext("myNotes");
         pickNote(note);
       });
       const deleteButton = document.createElement("button");
