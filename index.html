@@ -57,6 +57,10 @@
     button, textarea, input { font: inherit; color: inherit; }
     button { cursor: pointer; -webkit-tap-highlight-color: transparent; background: none; border: 0; padding: 0; }
 
+    body.is-booting #app {
+      visibility: hidden;
+    }
+
     body {
       margin: 0;
       min-width: 320px;
@@ -107,11 +111,11 @@
       justify-content: center;
       gap: 16px;
       cursor: pointer;
-      animation: splashFade 0.4s ease-in 1.2s forwards;
     }
-    /* 使用者點擊也能立刻消失 */
+    /* 資源就緒後才淡出；使用者點擊也能提早關閉 */
+    .splash.ready,
     .splash.dismissed {
-      animation: splashFade 0.3s ease-in forwards;
+      animation: splashFade 0.4s ease-out forwards;
     }
     @keyframes splashFade {
       to { opacity: 0; visibility: hidden; pointer-events: none; }
@@ -427,6 +431,27 @@
       -webkit-user-drag: none;
       /* 法式繪本硬陰影：用 drop-shadow 模擬 */
       filter: drop-shadow(2px 4px 0 rgba(31, 24, 18, 0.18));
+    }
+
+    /* 剩餘次數用 HTML 疊在 PNG 上方，避免被紙團線條遮住 */
+    .throw-ball-remaining {
+      position: absolute;
+      left: 50%;
+      bottom: 27%;
+      transform: translateX(-50%);
+      z-index: 2;
+      pointer-events: none;
+      white-space: nowrap;
+      font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: var(--ink-soft);
+      background: rgba(255, 248, 227, 0.94);
+      padding: 2px 8px 3px;
+      border-radius: 999px;
+      box-shadow: 0 0 0 1.5px rgba(255, 248, 227, 0.85);
+      line-height: 1.2;
     }
 
     .throw-paper-ball:active {
@@ -1184,13 +1209,14 @@
       .bottom-tab.left { padding-left: 18px; }
       .bottom-tab.right { padding-right: 18px; }
       .throw-paper-ball { width: 104px; height: 104px; }
+      .throw-ball-remaining { font-size: 10px; bottom: 26%; }
     }
   </style>
 </head>
 
-<body>
-  <!-- ============= 開場動畫（1.2 秒後自動淡出；點任意處可提早關） ============= -->
-  <div class="splash" id="splash" aria-hidden="true" onclick="this.classList.add('dismissed')">
+<body class="is-booting">
+  <!-- ============= 開場動畫（等資源就緒後淡出；點任意處可提早關） ============= -->
+  <div class="splash" id="splash" aria-hidden="false">
     <div class="splash-scene" aria-hidden="true">
       <!-- 信鴿叼著紙條飛過 -->
       <svg class="splash-bird" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
@@ -1280,7 +1306,8 @@
 
       <!-- ★ 中央大紙團「扔」按鈕 ★ -->
       <button id="openThrowButton" class="throw-paper-ball" type="button" title="丟紙條" aria-label="丟紙條">
-        <img src="paper_ball.png" alt="扔出去" />
+        <img src="paper_ball.png" alt="" aria-hidden="true" />
+        <span id="throwRemainingText" class="throw-ball-remaining">今日剩 10 次</span>
       </button>
 
       <button id="myNotesButton" class="bottom-tab right" type="button">
@@ -1454,6 +1481,8 @@
       留空白 = 直接用網頁版（在 LINE 外面打開也能正常運作）
     */
     const LIFF_ID = "2010143431-l2kcIl8v";
+    const DAILY_LIMIT = 10;
+    const MIN_SPLASH_MS = 800;
 
     let hasFirebase = Boolean(
       firebaseConfig.apiKey &&
@@ -1555,6 +1584,7 @@
       nearbySheet: document.querySelector("#nearbySheet"),
       nearbyList: document.querySelector("#nearbyList"),
       openThrowButton: document.querySelector("#openThrowButton"),
+      throwRemainingText: document.querySelector("#throwRemainingText"),
       throwSheet: document.querySelector("#throwSheet"),
       pickSheet: document.querySelector("#pickSheet"),
       citySheet: document.querySelector("#citySheet"),
@@ -1623,11 +1653,22 @@
 
     let currentTileLayer = null;
     let currentTileIndex = 0;
+    let bootTileResolve = null;
+    const bootTileReady = new Promise((resolve) => {
+      bootTileResolve = resolve;
+    });
+
+    function resolveBootTile() {
+      if (!bootTileResolve) return;
+      bootTileResolve();
+      bootTileResolve = null;
+    }
 
     function tryTileSource(index) {
       if (index >= TILE_SOURCES.length) {
         console.error("[圖磚] 所有來源都失敗，請檢查網路");
         showToast("地圖載入失敗，請檢查網路");
+        resolveBootTile();
         return;
       }
       const src = TILE_SOURCES[index];
@@ -1661,6 +1702,7 @@
           console.log(`[圖磚] ${src.name} 載入成功 ✓`);
           firstTileLoaded = true;
           clearTimeout(timeoutId);
+          resolveBootTile();
         }
       });
 
@@ -1682,25 +1724,89 @@
     // 開場動畫結束後強制重新計算地圖尺寸
     // 為什麼這樣做：splash 動畫期間 z-index 9999 蓋著畫面，Leaflet 可能拿到
     // 錯的容器尺寸；動畫結束時 invalidateSize() 強迫它重算。
-    // 為了保險，多次呼叫——時機點難以預測（手機 vs 桌機、字體載入快慢都有差）
     const splashEl = document.querySelector("#splash");
+    let appReady = false;
+    let splashDismissRequested = false;
+
     function fixMapSize(label) {
       map.invalidateSize();
       console.log(`[地圖] invalidateSize 觸發 (${label})`);
     }
 
-    // 1. 動畫淡出完成
-    if (splashEl) {
-      splashEl.addEventListener("animationend", () => fixMapSize("animationend"));
-      splashEl.addEventListener("click", () => setTimeout(() => fixMapSize("user-skip"), 350));
+    function dismissSplash() {
+      if (!appReady) return;
+      splashEl?.classList.add("ready");
+      splashEl?.setAttribute("aria-hidden", "true");
+      document.body.classList.remove("is-booting");
+      setTimeout(() => fixMapSize("splash-dismiss"), 450);
     }
-    // 2. 連續觸發三次 invalidateSize，分別在動畫前/中/後
-    //    確保任何時機點都至少有一次成功
-    setTimeout(() => fixMapSize("500ms"), 500);
-    setTimeout(() => fixMapSize("1.2s"), 1200);
-    setTimeout(() => fixMapSize("2s"), 2000);
-    // 3. 視窗 resize 也重算（手機橫直切換、瀏覽器調大小）
-    window.addEventListener("resize", () => fixMapSize("resize"));
+
+    function requestSplashDismiss() {
+      splashDismissRequested = true;
+      splashEl?.classList.add("dismissed");
+      if (appReady) dismissSplash();
+    }
+
+    if (splashEl) {
+      splashEl.addEventListener("click", requestSplashDismiss);
+      splashEl.addEventListener("animationend", () => fixMapSize("animationend"));
+    }
+
+    function preloadImage(src) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve();
+        img.onerror = reject;
+        img.src = src;
+      });
+    }
+
+    function delay(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    function getTodayThrowCount() {
+      const today = new Date().toISOString().slice(0, 10);
+      const usage = JSON.parse(localStorage.getItem("jzt_daily_usage") || "{}");
+      return usage.date === today ? (usage.count || 0) : 0;
+    }
+
+    function updateThrowRemainingLabel() {
+      const remaining = Math.max(0, DAILY_LIMIT - getTodayThrowCount());
+      els.throwRemainingText.textContent = `今日剩 ${remaining} 次`;
+      els.openThrowButton.setAttribute(
+        "aria-label",
+        remaining > 0 ? `丟紙條，今日剩 ${remaining} 次` : "今日次數已用完"
+      );
+    }
+
+    async function revealApp() {
+      const bootStart = performance.now();
+
+      try {
+        await Promise.all([
+          document.fonts?.ready ?? Promise.resolve(),
+          preloadImage("paper_ball.png").catch(() => {}),
+          Promise.race([bootTileReady, delay(8000)]),
+          locateMe()
+        ]);
+      } catch (err) {
+        console.warn("[開場] 部分資源載入失敗，仍繼續顯示", err);
+      }
+
+      updateThrowRemainingLabel();
+      map.invalidateSize();
+
+      if (!splashDismissRequested) {
+        const elapsed = performance.now() - bootStart;
+        if (elapsed < MIN_SPLASH_MS) {
+          await delay(MIN_SPLASH_MS - elapsed);
+        }
+      }
+
+      appReady = true;
+      dismissSplash();
+    }
 
     markersLayer = L.layerGroup().addTo(map);
     userMarker = L.marker([taipei.lat, taipei.lng], {
@@ -1711,6 +1817,8 @@
         iconAnchor: [11, 11]
       })
     }).addTo(map);
+
+    window.addEventListener("resize", () => fixMapSize("resize"));
 
     els.cityButton.addEventListener("click", () => openSheet("city"));
     els.cityHopButton.addEventListener("click", () => openSheet("city"));
@@ -1846,10 +1954,8 @@
       // === 每日扔紙條次數限制（C 方案：純前端檢查）===
       // 注意：這只擋一般使用者，懂技術的人可以繞過。
       // 想真正鎖死要寫 Firestore 規則 + Cloud Function。
-      const DAILY_LIMIT = 10;
       const today = new Date().toISOString().slice(0, 10);  // YYYY-MM-DD
-      const usage = JSON.parse(localStorage.getItem("jzt_daily_usage") || "{}");
-      const todayCount = usage.date === today ? (usage.count || 0) : 0;
+      const todayCount = getTodayThrowCount();
       if (todayCount >= DAILY_LIMIT) {
         showToast(`今天已經扔 ${DAILY_LIMIT} 張了，明天再來吧`);
         return;
@@ -1888,6 +1994,7 @@
           date: today,
           count: todayCount + 1
         }));
+        updateThrowRemainingLabel();
 
         els.noteInput.value = "";
         els.imageInput.value = "";
@@ -1942,7 +2049,7 @@
       els.submitNoteButton.disabled = !hasText && !hasImage;
     }
 
-    locateMe();
+    revealApp();
 
     function openSheet(name) {
       closeSheets();
@@ -2078,38 +2185,45 @@
       openSheet("nearby");
     }
 
-    async function locateMe() {
+    function locateMe() {
       els.locateText.textContent = "定位中";
       els.locateButton.classList.add("locating");
 
-      if (!navigator.geolocation) {
-        showToast("這個瀏覽器不支援定位，先用台北測試");
-        els.locateText.textContent = "重新定位";
-        els.locateButton.classList.remove("locating");
-        return;
-      }
+      return new Promise((resolve) => {
+        const finish = async () => {
+          try {
+            await refreshNotes();
+          } finally {
+            els.locateText.textContent = "重新定位";
+            els.locateButton.classList.remove("locating");
+            resolve();
+          }
+        };
 
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          currentLocation = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          };
-          currentCity = await reverseCity(currentLocation);
-          map.setView([currentLocation.lat, currentLocation.lng], 15);
-          userMarker.setLatLng([currentLocation.lat, currentLocation.lng]);
-          await refreshNotes();
-          els.locateText.textContent = "重新定位";
-          els.locateButton.classList.remove("locating");
-        },
-        async () => {
-          showToast("無法取得定位，先用台北測試");
-          els.locateText.textContent = "重新定位";
-          els.locateButton.classList.remove("locating");
-          await refreshNotes();
-        },
-        { enableHighAccuracy: true, timeout: 8000 }
-      );
+        if (!navigator.geolocation) {
+          showToast("這個瀏覽器不支援定位，先用台北測試");
+          finish();
+          return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            currentLocation = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude
+            };
+            currentCity = await reverseCity(currentLocation);
+            map.setView([currentLocation.lat, currentLocation.lng], 15);
+            userMarker.setLatLng([currentLocation.lat, currentLocation.lng]);
+            await finish();
+          },
+          async () => {
+            showToast("無法取得定位，先用台北測試");
+            await finish();
+          },
+          { enableHighAccuracy: true, timeout: 8000 }
+        );
+      });
     }
 
     async function refreshNotes() {
