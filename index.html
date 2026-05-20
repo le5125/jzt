@@ -294,28 +294,75 @@
     }
 
     /* ========== Marker 樣式 ========== */
+    /* 別人的紙條 (📃)：奶黃色信紙 */
     .paper-marker {
-      width: 32px;
-      height: 32px;
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      line-height: 1;
       background:
-        radial-gradient(circle at 30% 30%, #fff9e9 0%, #f4e4be 60%, #d9bf85 100%);
-      border-radius: 60% 50% 65% 45% / 50% 60% 40% 55%;
+        radial-gradient(circle at 30% 30%, #fffaee 0%, #f4e4be 60%, #d9bf85 100%);
+      border-radius: 8px 10px 7px 9px;
       box-shadow:
-        inset -2px -3px 6px rgba(75, 56, 35, 0.2),
-        inset 2px 2px 4px rgba(255, 255, 255, 0.6),
-        0 6px 14px rgba(75, 56, 35, 0.3);
-      transform: rotate(-12deg);
+        inset -2px -3px 6px rgba(75, 56, 35, 0.18),
+        inset 2px 2px 4px rgba(255, 255, 255, 0.7),
+        0 6px 14px rgba(75, 56, 35, 0.32);
+      transform: rotate(-6deg);
       position: relative;
+      cursor: pointer;
+      transition: transform 0.2s ease;
     }
 
-    .paper-marker::after {
+    .paper-marker:hover { transform: rotate(-6deg) scale(1.1); }
+
+    /* 自己的紙條 (📜)：朱印章紅邊框 */
+    .paper-marker.mine {
+      background:
+        radial-gradient(circle at 30% 30%, #fff6e8 0%, #ffe2c4 60%, #e8b787 100%);
+      border: 2px solid var(--seal);
+      box-shadow:
+        inset -2px -3px 6px rgba(184, 49, 44, 0.15),
+        inset 2px 2px 4px rgba(255, 255, 255, 0.7),
+        0 6px 14px rgba(184, 49, 44, 0.4);
+    }
+
+    /* 圖片紙條：顯示縮圖 */
+    .paper-marker.image-marker {
+      width: 44px;
+      height: 44px;
+      padding: 3px;
+      background: #fffaee;
+      border-radius: 8px;
+      border: 1.5px solid #d9bf85;
+      transform: rotate(-4deg);
+    }
+    .paper-marker.image-marker.mine {
+      border-color: var(--seal);
+    }
+    .paper-marker.image-marker img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 5px;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    /* 朱印標記（自己紙條右上角）*/
+    .paper-marker.mine::before {
       content: "";
       position: absolute;
-      inset: 6px;
-      background:
-        linear-gradient(120deg, transparent 30%, rgba(75, 56, 35, 0.06) 50%, transparent 70%),
-        linear-gradient(60deg, transparent 40%, rgba(75, 56, 35, 0.05) 55%, transparent 75%);
-      border-radius: inherit;
+      top: -3px;
+      right: -3px;
+      width: 10px;
+      height: 10px;
+      background: var(--seal);
+      border-radius: 50%;
+      border: 1.5px solid white;
+      box-shadow: 0 1px 3px rgba(184, 49, 44, 0.5);
     }
 
     .user-marker {
@@ -829,12 +876,13 @@
 
     <!-- 底部三欄 -->
     <div class="bottom-bar" aria-label="主要操作">
-      <button id="mapTabButton" class="bottom-tab left active" type="button">
+      <button id="nearbyListButton" class="bottom-tab left" type="button">
         <svg class="icon" viewBox="0 0 24 24">
-          <path d="M9 4l-6 2v14l6-2 6 2 6-2V4l-6 2-6-2z"/>
-          <path d="M9 4v14M15 6v14"/>
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+          <circle cx="12" cy="12" r="9" stroke-dasharray="2 3" opacity="0.6"/>
         </svg>
-        <span>地圖</span>
+        <span>附近</span>
       </button>
 
       <!-- ★ 中央大紙團「扔」按鈕 ★ -->
@@ -873,6 +921,15 @@
           <button id="submitNoteButton" class="primary-button" type="submit" disabled>扔出去</button>
         </div>
       </form>
+    </section>
+
+    <!-- 附近紙條列表抽屜 -->
+    <section id="nearbySheet" class="sheet" aria-label="附近紙條">
+      <header class="sheet-header">
+        <h2>附近的紙條</h2>
+        <button class="close-button" type="button" data-close>×</button>
+      </header>
+      <div id="nearbyList" class="note-list"></div>
     </section>
 
     <!-- 撿到紙條抽屜 -->
@@ -1019,6 +1076,9 @@
       locateButton: document.querySelector("#locateButton"),
       refreshButton: document.querySelector("#refreshButton"),
       cityHopButton: document.querySelector("#cityHopButton"),
+      nearbyListButton: document.querySelector("#nearbyListButton"),
+      nearbySheet: document.querySelector("#nearbySheet"),
+      nearbyList: document.querySelector("#nearbyList"),
       openThrowButton: document.querySelector("#openThrowButton"),
       throwSheet: document.querySelector("#throwSheet"),
       pickSheet: document.querySelector("#pickSheet"),
@@ -1081,6 +1141,7 @@
     });
     els.openThrowButton.addEventListener("click", () => openSheet("throw"));
     els.myNotesButton.addEventListener("click", showMyNotes);
+    els.nearbyListButton.addEventListener("click", showNearbyList);
     els.backButton.addEventListener("click", () => els.myNotesPage.classList.remove("open"));
     els.nearbyAlert.addEventListener("click", pickNearestNote);
     els.replyInput.addEventListener("input", () => {
@@ -1211,12 +1272,60 @@
       if (name === "throw") els.throwSheet.classList.add("open");
       if (name === "pick") els.pickSheet.classList.add("open");
       if (name === "city") els.citySheet.classList.add("open");
+      if (name === "nearby") els.nearbySheet.classList.add("open");
     }
 
     function closeSheets() {
       els.throwSheet.classList.remove("open");
       els.pickSheet.classList.remove("open");
       els.citySheet.classList.remove("open");
+      els.nearbySheet.classList.remove("open");
+    }
+
+    function showNearbyList() {
+      const sorted = notes
+        .map((note) => ({ note, distance: distanceMeters(currentLocation, note.location) }))
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, 30);
+
+      els.nearbyList.innerHTML = "";
+      if (sorted.length === 0) {
+        els.nearbyList.innerHTML = '<p class="muted">這個區域還沒有紙條。</p>';
+      } else {
+        sorted.forEach(({ note, distance }) => {
+          const isMine = note.authorUid === currentUserId;
+          const card = document.createElement("article");
+          card.className = "note-card";
+          card.style.cursor = "pointer";
+
+          if (note.imageUrl) {
+            const img = document.createElement("img");
+            img.className = "picked-image";
+            img.src = note.imageUrl;
+            img.alt = "";
+            img.style.maxHeight = "140px";
+            card.appendChild(img);
+          }
+
+          const p = document.createElement("p");
+          p.textContent = note.content || "圖片紙條";
+          card.appendChild(p);
+
+          const meta = document.createElement("span");
+          meta.className = "muted";
+          const distText = distance < 1000 ? `${Math.round(distance)} 公尺` : `${(distance / 1000).toFixed(1)} 公里`;
+          meta.textContent = `${isMine ? "📜 我的" : "📃 別人"} · ${distText} · 被撿起 ${note.pickedCount} 次`;
+          card.appendChild(meta);
+
+          card.addEventListener("click", () => {
+            closeSheets();
+            pickNote(note);
+          });
+          els.nearbyList.appendChild(card);
+        });
+      }
+
+      openSheet("nearby");
     }
 
     async function locateMe() {
@@ -1280,13 +1389,31 @@
       markersLayer.clearLayers();
 
       notes.forEach((note) => {
+        const isMine = note.authorUid === currentUserId;
+        const hasImage = note.imageUrl && note.type === "image";
+
+        // 決定 marker HTML
+        let markerHtml;
+        let iconSize;
+        if (hasImage) {
+          // 圖片紙條：顯示縮圖
+          const escapedUrl = note.imageUrl.replaceAll('"', '&quot;');
+          markerHtml = `<div class="paper-marker image-marker ${isMine ? 'mine' : ''}"><img src="${escapedUrl}" alt="" /></div>`;
+          iconSize = 44;
+        } else {
+          // 文字紙條：用 emoji 顯示
+          const emoji = isMine ? "📜" : "📃";
+          markerHtml = `<div class="paper-marker ${isMine ? 'mine' : ''}">${emoji}</div>`;
+          iconSize = 36;
+        }
+
         const marker = L.marker([note.location.lat, note.location.lng], {
           title: note.content || "圖片紙條",
           icon: L.divIcon({
             className: "",
-            html: '<div class="paper-marker"></div>',
-            iconSize: [34, 34],
-            iconAnchor: [17, 17]
+            html: markerHtml,
+            iconSize: [iconSize, iconSize],
+            iconAnchor: [iconSize / 2, iconSize / 2]
           })
         });
 
