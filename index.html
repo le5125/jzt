@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#fbeed4" />
-  <title>丟紙條</title>
+  <title>丟紙條 · 法式繪本</title>
 
   <!-- 法式繪本字體：Caveat（手寫流暢）+ Patrick Hand（手寫工整）+ 思源中文 -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -274,6 +274,44 @@
       transform: rotate(2deg);
     }
 
+    /* ========== 篩選器 ========== */
+    .filter-bar {
+      position: absolute;
+      z-index: 500;
+      top: calc(max(16px, env(safe-area-inset-top)) + 64px);
+      left: 16px;
+      right: 16px;
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      pointer-events: none;
+    }
+    .filter-pill {
+      pointer-events: auto;
+      padding: 6px 14px;
+      border: 2.5px solid var(--ink);
+      border-radius: 999px;
+      background: var(--paper-light);
+      color: var(--ink);
+      font-family: inherit;
+      font-weight: 700;
+      font-size: 13px;
+      letter-spacing: 0.05em;
+      box-shadow: 2px 2px 0 var(--ink);
+      transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.15s ease;
+    }
+    .filter-pill:nth-child(1) { transform: rotate(-1deg); }
+    .filter-pill:nth-child(2) { transform: rotate(1deg); }
+    .filter-pill:nth-child(3) { transform: rotate(-1deg); }
+    .filter-pill.active {
+      background: var(--tomato);
+      color: var(--paper);
+    }
+    .filter-pill:active {
+      transform: translate(2px, 2px) rotate(0) !important;
+      box-shadow: 0 0 0 var(--ink);
+    }
+
     /* ========== 右側懸浮控制鈕 ========== */
     .side-controls {
       position: absolute;
@@ -371,12 +409,11 @@
     /* ★ 中央大紙團「扔」按鈕 ★ */
     .throw-paper-ball {
       pointer-events: auto;
-      width: 120px;
-      height: 120px;
+      width: 130px;
+      height: 130px;
       position: relative;
-      transform: translateY(-16px);
+      transform: translateY(-18px);
       cursor: pointer;
-      filter: drop-shadow(3px 5px 0 var(--ink));
       animation: paperFloat 4s ease-in-out infinite;
       transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
     }
@@ -388,16 +425,18 @@
       pointer-events: none;
       user-select: none;
       -webkit-user-drag: none;
+      /* 法式繪本硬陰影：用 drop-shadow 模擬 */
+      filter: drop-shadow(2px 4px 0 rgba(31, 24, 18, 0.18));
     }
 
     .throw-paper-ball:active {
-      transform: translateY(-12px) scale(0.92);
+      transform: translateY(-14px) scale(0.92);
       animation: none;
     }
 
     @keyframes paperFloat {
-      0%, 100% { transform: translateY(-16px) rotate(-3deg); }
-      50%      { transform: translateY(-22px) rotate(3deg); }
+      0%, 100% { transform: translateY(-18px) rotate(-3deg); }
+      50%      { transform: translateY(-24px) rotate(3deg); }
     }
 
     /* ========== Marker（地圖上的紙條圖示） ========== */
@@ -427,6 +466,15 @@
     .paper-marker.mine {
       background: var(--tomato);
       color: var(--paper);
+    }
+
+    /* 追蹤中的人的紙條：天空藍 */
+    .paper-marker.followed {
+      background: var(--sky);
+      color: var(--paper);
+    }
+    .paper-marker.followed::before {
+      background: var(--olive);
     }
 
     /* 圖片紙條 */
@@ -502,6 +550,17 @@
       transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);
     }
     .sheet.open { transform: translateY(0); }
+
+    /* 高版抽屜：用於「我的紙條」這種內容多的，撐到接近全螢幕 */
+    .sheet-tall {
+      max-height: calc(100vh - 40px);
+      min-height: 70vh;
+    }
+
+    /* 拖拉中的抽屜暫時關閉動畫，直接跟手指 */
+    .sheet.dragging {
+      transition: none;
+    }
 
     /* 抽屜頂部小握把 */
     .sheet::before {
@@ -679,6 +738,15 @@
     }
 
     /* ========== 撿到紙條 - 主體 ========== */
+    /* 作者列：綽號 + 追蹤按鈕 */
+    .picked-author-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 4px;
+    }
+
     /* 紙條來自誰 - 匿名綽號 */
     .picked-author {
       margin: 0 0 4px 4px;
@@ -695,6 +763,30 @@
       box-shadow: 2px 3px 0 var(--ink);
     }
     .picked-author.mine {
+      background: var(--olive);
+      color: var(--paper-light);
+    }
+
+    /* 追蹤按鈕 */
+    .follow-button {
+      border: 2.5px solid var(--ink);
+      border-radius: 14px 18px 13px 17px;
+      padding: 6px 14px;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: inherit;
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: 0.05em;
+      box-shadow: 2px 2px 0 var(--ink);
+      transform: rotate(1deg);
+      transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.15s ease;
+    }
+    .follow-button:active {
+      transform: rotate(1deg) translate(2px, 2px);
+      box-shadow: 0 0 0 var(--ink);
+    }
+    .follow-button.following {
       background: var(--olive);
       color: var(--paper-light);
     }
@@ -1030,6 +1122,63 @@
       to   { opacity: 1; transform: translateX(-50%) translateY(0) rotate(-1deg); }
     }
 
+    /* ========== 自製對話框（取代 alert/confirm） ========== */
+    .dialog-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 2000;
+      background: rgba(31, 24, 18, 0.4);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      animation: dialogFadeIn 0.2s ease-out;
+    }
+    .dialog-backdrop.show { display: flex; }
+
+    @keyframes dialogFadeIn {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+
+    .dialog-box {
+      background: var(--paper-light);
+      border: 3px solid var(--ink);
+      border-radius: 18px 22px 19px 21px;
+      box-shadow: var(--shadow-lg);
+      padding: 24px 22px 22px;
+      max-width: 360px;
+      width: 100%;
+      transform: rotate(-1deg);
+      animation: dialogPopIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    @keyframes dialogPopIn {
+      from { opacity: 0; transform: rotate(-1deg) scale(0.85); }
+      to   { opacity: 1; transform: rotate(-1deg) scale(1); }
+    }
+
+    .dialog-message {
+      margin: 0 0 22px;
+      font-size: 17px;
+      line-height: 1.7;
+      color: var(--ink);
+      font-weight: 700;
+      white-space: pre-wrap;
+    }
+
+    .dialog-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+    }
+    .dialog-actions .primary-button,
+    .dialog-actions .secondary-button {
+      min-width: 88px;
+      min-height: 42px;
+      padding: 0 18px;
+      font-size: 15px;
+    }
+
     @media (max-width: 380px) {
       .note-meta { grid-template-columns: 1fr 1fr; }
       .bottom-tab.left { padding-left: 18px; }
@@ -1085,6 +1234,13 @@
       </button>
     </div>
 
+    <!-- 篩選器：全部 / 我追蹤 / 我的 -->
+    <div class="filter-bar" aria-label="篩選地圖紙條">
+      <button class="filter-pill active" data-filter="all" type="button">全部</button>
+      <button class="filter-pill" data-filter="following" type="button">我追蹤</button>
+      <button class="filter-pill" data-filter="mine" type="button">我的</button>
+    </div>
+
     <!-- 右側懸浮控制鈕（垂直）-->
     <div class="side-controls" aria-label="地圖控制">
       <!-- 定位 -->
@@ -1124,7 +1280,7 @@
 
       <!-- ★ 中央大紙團「扔」按鈕 ★ -->
       <button id="openThrowButton" class="throw-paper-ball" type="button" title="丟紙條" aria-label="丟紙條">
-        <img src="paper_ball.png" alt="丟" />
+        <img src="paper_ball.png" alt="扔出去" />
       </button>
 
       <button id="myNotesButton" class="bottom-tab right" type="button">
@@ -1176,7 +1332,10 @@
         <button class="close-button" type="button" data-close>×</button>
       </header>
       <article class="picked-note">
-        <p id="pickedAuthor" class="picked-author">—</p>
+        <div class="picked-author-row">
+          <p id="pickedAuthor" class="picked-author">—</p>
+          <button id="followButton" class="follow-button" type="button" hidden>+ 追蹤</button>
+        </div>
         <p id="pickedContent" class="note-content"></p>
         <dl class="note-meta">
           <div>
@@ -1243,15 +1402,22 @@
       <div id="cityResults"></div>
     </section>
 
-    <!-- 我的紙條頁 -->
-    <section id="myNotesPage" class="page" aria-label="我的紙條">
-      <header class="page-header">
-        <button id="backButton" class="side-button" type="button" title="返回地圖">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M15 18l-6-6 6-6"/>
-          </svg>
-        </button>
-        <h1>我的紙條</h1>
+    <!-- 自製對話框（取代 alert/confirm） -->
+    <div id="dialogBackdrop" class="dialog-backdrop" aria-hidden="true">
+      <div class="dialog-box" role="dialog">
+        <p id="dialogMessage" class="dialog-message">—</p>
+        <div class="dialog-actions">
+          <button id="dialogCancel" class="secondary-button" type="button">取消</button>
+          <button id="dialogConfirm" class="primary-button" type="button">確定</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 我的紙條抽屜（可下滑關閉） -->
+    <section id="myNotesPage" class="sheet sheet-tall" aria-label="我的紙條">
+      <header class="sheet-header">
+        <h2>我的紙條</h2>
+        <button class="close-button" type="button" data-close>×</button>
       </header>
       <p id="myNickname" class="my-nickname">—</p>
       <div id="myNotesList" class="note-list"></div>
@@ -1390,6 +1556,7 @@
       throwForm: document.querySelector("#throwForm"),
       pickedContent: document.querySelector("#pickedContent"),
       pickedAuthor: document.querySelector("#pickedAuthor"),
+      followButton: document.querySelector("#followButton"),
       pickedCity: document.querySelector("#pickedCity"),
       pickedCount: document.querySelector("#pickedCount"),
       pickedTime: document.querySelector("#pickedTime"),
@@ -1406,7 +1573,6 @@
       myNotesPage: document.querySelector("#myNotesPage"),
       myNotesList: document.querySelector("#myNotesList"),
       myNickname: document.querySelector("#myNickname"),
-      backButton: document.querySelector("#backButton"),
       cityForm: document.querySelector("#cityForm"),
       cityInput: document.querySelector("#cityInput"),
       cityResults: document.querySelector("#cityResults"),
@@ -1417,29 +1583,30 @@
 
     /*
       地圖瓦片來源策略：依序嘗試
-      1. NLSC 國土測繪中心 - 台灣官方圖資、全中文、最精細
-      2. OSM 台灣中文版 - 如果 NLSC 載入失敗的備援
-      3. OSM 國際版 - 最後備援，台灣以外地區也能用
+      1. OSM 國際版（最穩定、線條簡單、全球可用，預設）
+      2. NLSC 國土測繪中心（台灣官方圖資、街道全中文）
+      3. OSM 台灣中文版（社群維護）
 
-      NLSC URL 格式：注意是 GoogleMapsCompatible，不是 EPSG:3857
+      改變策略原因：在 LINE WebView 內 NLSC 容易被擋（CORS 限制），
+      OSM 國際版是業界標準，幾乎不會失敗。
     */
     const TILE_SOURCES = [
       {
+        name: "OSM-World",
+        url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        attribution: "&copy; OpenStreetMap",
+        maxZoom: 19
+      },
+      {
         name: "NLSC",
         url: "https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{z}/{y}/{x}",
-        attribution: "&copy; 國土測繪中心 NLSC",
+        attribution: "&copy; 國土測繪中心",
         maxZoom: 18
       },
       {
         name: "OSM-TW",
         url: "https://tile.openstreetmap.tw/tiles/{z}/{x}/{y}.png",
         attribution: "&copy; OSM Taiwan",
-        maxZoom: 19
-      },
-      {
-        name: "OSM-World",
-        url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-        attribution: "&copy; OpenStreetMap",
         maxZoom: 19
       }
     ];
@@ -1551,7 +1718,6 @@
     els.openThrowButton.addEventListener("click", () => openSheet("throw"));
     els.myNotesButton.addEventListener("click", showMyNotes);
     els.nearbyListButton.addEventListener("click", showNearbyList);
-    els.backButton.addEventListener("click", () => els.myNotesPage.classList.remove("open"));
     els.nearbyAlert.addEventListener("click", pickNearestNote);
     els.replyInput.addEventListener("input", () => {
       const left = 140 - els.replyInput.value.length;
@@ -1611,10 +1777,23 @@
       }
     });
 
+    // === 追蹤這個人 ===
+    els.followButton.addEventListener("click", () => {
+      if (!selectedNote) return;
+      const newState = toggleFollow(selectedNote.authorUid);
+      updateFollowButtonUI(selectedNote.authorUid);
+      showToast(newState ? "已追蹤" : "已取消追蹤");
+      // 如果目前在地圖上「只看追蹤」篩選模式，重新繪製
+      renderNotes();
+    });
+
     // === 檢舉紙條 ===
     els.reportNoteButton.addEventListener("click", async () => {
       if (!selectedNote) return;
-      if (!confirm("確定要檢舉這張紙條？\n達到 3 次檢舉會自動下架。")) return;
+      const ok = await customConfirm("確定要檢舉這張紙條？\n達到 3 次檢舉會自動下架。", {
+        confirmText: "檢舉", danger: true
+      });
+      if (!ok) return;
       try {
         await reportNote(selectedNote);
         showToast("已收到檢舉，謝謝你");
@@ -1756,12 +1935,44 @@
     await refreshNotes();
     locateMe();
 
+    /*
+      === 自動背景更新 ===
+      每 30 秒撈一次最新紙條，讓使用者不用手動按重新整理
+      條件：
+       - 沒有任何抽屜開著（避免使用者寫字寫到一半畫面跳動）
+       - 分頁是可見的（背景頁面不浪費 Firebase 額度）
+       - 使用者也沒在我的紙條頁
+    */
+    const AUTO_REFRESH_MS = 30000;
+    setInterval(async () => {
+      // 抽屜開著、或在我的紙條頁時不更新
+      const anySheetOpen = document.querySelector(".sheet.open");
+      const onMyNotes = els.myNotesPage.classList.contains("open");
+      if (anySheetOpen || onMyNotes) return;
+      if (document.hidden) return;
+
+      try {
+        await refreshNotes();
+        console.log("[自動更新] 紙條已同步");
+      } catch (err) {
+        console.warn("[自動更新] 失敗，下次再試", err);
+      }
+    }, AUTO_REFRESH_MS);
+
+    // 分頁從背景切回前景時，立刻刷新一次
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        refreshNotes().catch((err) => console.warn("[切回前景刷新失敗]", err));
+      }
+    });
+
     function openSheet(name) {
       closeSheets();
       if (name === "throw") els.throwSheet.classList.add("open");
       if (name === "pick") els.pickSheet.classList.add("open");
       if (name === "city") els.citySheet.classList.add("open");
       if (name === "nearby") els.nearbySheet.classList.add("open");
+      if (name === "myNotes") els.myNotesPage.classList.add("open");
     }
 
     function closeSheets() {
@@ -1769,6 +1980,78 @@
       els.pickSheet.classList.remove("open");
       els.citySheet.classList.remove("open");
       els.nearbySheet.classList.remove("open");
+      els.myNotesPage.classList.remove("open");
+    }
+
+    /*
+      抽屜手勢：往下滑可關閉
+      只在標題列範圍內偵測，避免內容滾動衝突
+    */
+    function attachSwipeDownToClose(sheet) {
+      const header = sheet.querySelector(".sheet-header");
+      if (!header) return;
+
+      let startY = 0;
+      let currentY = 0;
+      let dragging = false;
+
+      header.addEventListener("touchstart", (e) => {
+        startY = e.touches[0].clientY;
+        currentY = startY;
+        dragging = true;
+      }, { passive: true });
+
+      header.addEventListener("touchmove", (e) => {
+        if (!dragging) return;
+        currentY = e.touches[0].clientY;
+        const dy = currentY - startY;
+        if (dy > 0) {
+          sheet.classList.add("dragging");
+          sheet.style.transform = `translateY(${dy}px)`;
+        }
+      }, { passive: true });
+
+      header.addEventListener("touchend", () => {
+        if (!dragging) return;
+        dragging = false;
+        const dy = currentY - startY;
+        sheet.classList.remove("dragging");
+        sheet.style.transform = "";
+        // 拖超過 80px 就視為關閉
+        if (dy > 80) {
+          sheet.classList.remove("open");
+        }
+      });
+    }
+
+    // 對所有抽屜啟用滑動關閉
+    document.querySelectorAll(".sheet").forEach(attachSwipeDownToClose);
+
+    /*
+      ============= 地圖篩選器 =============
+      currentFilter: "all" | "following" | "mine"
+      切換後立即重畫 marker
+    */
+    let currentFilter = "all";
+    document.querySelectorAll(".filter-pill").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".filter-pill").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        currentFilter = btn.dataset.filter;
+        renderNotes();
+      });
+    });
+
+    function applyFilter(noteList) {
+      if (currentFilter === "all") return noteList;
+      if (currentFilter === "mine") {
+        return noteList.filter((n) => n.authorUid === currentUserId);
+      }
+      if (currentFilter === "following") {
+        const followed = getFollowedUids();
+        return noteList.filter((n) => followed.has(n.authorUid) || n.authorUid === currentUserId);
+      }
+      return noteList;
     }
 
     function showNearbyList() {
@@ -1877,9 +2160,18 @@
     function renderNotes() {
       markersLayer.clearLayers();
 
-      notes.forEach((note) => {
+      // 套用使用者選的篩選器
+      const visibleNotes = applyFilter(notes);
+
+      visibleNotes.forEach((note) => {
         const isMine = note.authorUid === currentUserId;
+        const isFollowed = isFollowing(note.authorUid);
         const hasImage = note.imageUrl && note.type === "image";
+
+        // 決定 marker class
+        let extraClass = "";
+        if (isMine) extraClass = "mine";
+        else if (isFollowed) extraClass = "followed";
 
         // 決定 marker HTML
         let markerHtml;
@@ -1887,12 +2179,14 @@
         if (hasImage) {
           // 圖片紙條：顯示縮圖
           const escapedUrl = note.imageUrl.replaceAll('"', '&quot;');
-          markerHtml = `<div class="paper-marker image-marker ${isMine ? 'mine' : ''}"><img src="${escapedUrl}" alt="" /></div>`;
+          markerHtml = `<div class="paper-marker image-marker ${extraClass}"><img src="${escapedUrl}" alt="" /></div>`;
           iconSize = 44;
         } else {
           // 文字紙條：用 emoji 顯示
-          const emoji = isMine ? "📜" : "📃";
-          markerHtml = `<div class="paper-marker ${isMine ? 'mine' : ''}">${emoji}</div>`;
+          let emoji = "📃";
+          if (isMine) emoji = "📜";
+          else if (isFollowed) emoji = "📨";  // 追蹤中的人有獨特圖示
+          markerHtml = `<div class="paper-marker ${extraClass}">${emoji}</div>`;
           iconSize = 36;
         }
 
@@ -1910,7 +2204,7 @@
         marker.addTo(markersLayer);
       });
 
-      const nearby = notes.filter((note) => 
+      const nearby = visibleNotes.filter((note) =>
         note.authorUid !== currentUserId &&
         distanceMeters(currentLocation, note.location) <= 300
       );
@@ -1954,6 +2248,14 @@
       renderPickedNote(note);
       els.pickedAuthor.textContent = isOwn ? `來自我（${nicknameOf(note.authorUid)}）` : `來自 ${nicknameOf(note.authorUid)}`;
       els.pickedAuthor.classList.toggle("mine", isOwn);
+
+      // 追蹤按鈕：只在「別人」的紙條 + 不是 seed 紙條時顯示
+      const canFollow = !isOwn && note.authorUid !== "seed";
+      els.followButton.hidden = !canFollow;
+      if (canFollow) {
+        updateFollowButtonUI(note.authorUid);
+      }
+
       els.pickedCity.textContent = note.city;
       els.pickedCount.textContent = `${note.pickedCount} 次`;
       els.pickedTime.textContent = new Date(note.createdAt).toLocaleString("zh-TW");
@@ -2083,7 +2385,10 @@
           deleteButton.type = "button";
           deleteButton.textContent = "撿回刪除";
           deleteButton.addEventListener("click", async () => {
-            if (!confirm("確定要撿回並刪除這張紙條嗎？")) return;
+            const ok = await customConfirm("確定要撿回並刪除這張紙條嗎？", {
+              confirmText: "刪除", danger: true
+            });
+            if (!ok) return;
             await deleteMyNote(note);
             showToast("紙條已刪除");
             await refreshNotes();
@@ -2462,6 +2767,44 @@
       return `${adj}${ani} #${num}`;
     }
 
+    /*
+      ============= 追蹤系統 =============
+      存「我追蹤的 UID」清單到 localStorage
+      純前端設計：每個人的追蹤名單只在自己瀏覽器、不上 Firebase
+      優點：不動 Firestore 規則、零後端成本、不影響別人隱私
+      缺點：換裝置會遺失（如果用 LIFF 登入 LINE，跨裝置 UID 一樣但追蹤名單不同步）
+    */
+    function getFollowedUids() {
+      try {
+        return new Set(JSON.parse(localStorage.getItem("jzt_following") || "[]"));
+      } catch {
+        return new Set();
+      }
+    }
+
+    function isFollowing(uid) {
+      return getFollowedUids().has(uid);
+    }
+
+    function toggleFollow(uid) {
+      const set = getFollowedUids();
+      if (set.has(uid)) {
+        set.delete(uid);
+        localStorage.setItem("jzt_following", JSON.stringify([...set]));
+        return false;  // 已取消追蹤
+      } else {
+        set.add(uid);
+        localStorage.setItem("jzt_following", JSON.stringify([...set]));
+        return true;   // 已追蹤
+      }
+    }
+
+    function updateFollowButtonUI(uid) {
+      const following = isFollowing(uid);
+      els.followButton.textContent = following ? "✓ 追蹤中" : "+ 追蹤";
+      els.followButton.classList.toggle("following", following);
+    }
+
     function distanceMeters(a, b) {
       const earthRadius = 6371000;
       const toRad = (value) => value * Math.PI / 180;
@@ -2478,6 +2821,67 @@
       els.toast.textContent = message;
       els.toast.classList.add("show");
       window.setTimeout(() => els.toast.classList.remove("show"), 2200);
+    }
+
+    /*
+      自製對話框：取代原生 alert/confirm，配合法式繪本風格
+      用法：
+        const ok = await customConfirm("要刪除嗎？");
+        if (ok) ...
+        await customAlert("已刪除");
+    */
+    const dialogBackdrop = document.querySelector("#dialogBackdrop");
+    const dialogMessage = document.querySelector("#dialogMessage");
+    const dialogConfirm = document.querySelector("#dialogConfirm");
+    const dialogCancel = document.querySelector("#dialogCancel");
+
+    function customConfirm(message, { confirmText = "確定", cancelText = "取消", danger = false } = {}) {
+      return new Promise((resolve) => {
+        dialogMessage.textContent = message;
+        dialogConfirm.textContent = confirmText;
+        dialogCancel.textContent = cancelText;
+        dialogCancel.style.display = "";
+        // 標示危險動作（紅色按鈕）
+        dialogConfirm.classList.toggle("danger-button", danger);
+        dialogConfirm.classList.toggle("primary-button", !danger);
+
+        dialogBackdrop.classList.add("show");
+
+        const onConfirm = () => { cleanup(); resolve(true); };
+        const onCancel = () => { cleanup(); resolve(false); };
+        const onBackdrop = (e) => { if (e.target === dialogBackdrop) onCancel(); };
+
+        function cleanup() {
+          dialogBackdrop.classList.remove("show");
+          dialogConfirm.removeEventListener("click", onConfirm);
+          dialogCancel.removeEventListener("click", onCancel);
+          dialogBackdrop.removeEventListener("click", onBackdrop);
+        }
+
+        dialogConfirm.addEventListener("click", onConfirm);
+        dialogCancel.addEventListener("click", onCancel);
+        dialogBackdrop.addEventListener("click", onBackdrop);
+      });
+    }
+
+    function customAlert(message, { confirmText = "好" } = {}) {
+      return new Promise((resolve) => {
+        dialogMessage.textContent = message;
+        dialogConfirm.textContent = confirmText;
+        dialogCancel.style.display = "none";
+        dialogConfirm.classList.add("primary-button");
+        dialogConfirm.classList.remove("danger-button");
+
+        dialogBackdrop.classList.add("show");
+
+        const onConfirm = () => {
+          dialogBackdrop.classList.remove("show");
+          dialogCancel.style.display = "";  // 恢復
+          dialogConfirm.removeEventListener("click", onConfirm);
+          resolve();
+        };
+        dialogConfirm.addEventListener("click", onConfirm);
+      });
     }
 
     function escapeHtml(value) {
