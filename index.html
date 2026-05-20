@@ -1361,13 +1361,6 @@
           <path d="M21 3v5h-5"/>
         </svg>
       </button>
-      <!-- 切換城市 -->
-      <button id="cityHopButton" class="side-button" type="button" title="切換城市">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 22s-7-7.5-7-13a7 7 0 0114 0c0 5.5-7 13-7 13z"/>
-          <circle cx="12" cy="9" r="2.5"/>
-        </svg>
-      </button>
     </div>
 
     <!-- 底部三欄 -->
@@ -1716,7 +1709,6 @@
       locateText: document.querySelector("#locateText"),
       locateButton: document.querySelector("#locateButton"),
       refreshButton: document.querySelector("#refreshButton"),
-      cityHopButton: document.querySelector("#cityHopButton"),
       nearbyListButton: document.querySelector("#nearbyListButton"),
       nearbySheet: document.querySelector("#nearbySheet"),
       nearbyList: document.querySelector("#nearbyList"),
@@ -2140,7 +2132,6 @@
     window.addEventListener("resize", () => fixMapSize("resize"));
 
     els.cityButton.addEventListener("click", () => openSheet("city"));
-    els.cityHopButton.addEventListener("click", () => openSheet("city"));
     els.locateButton.addEventListener("click", locateMe);
     els.refreshButton.addEventListener("click", async () => {
       els.refreshButton.style.transform = "rotate(360deg)";
