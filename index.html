@@ -1810,7 +1810,8 @@
 
     async function revealApp() {
       const bootStart = performance.now();
-      const hardCapTimer = setTimeout(() => finishBoot("hard-cap"), 4500);
+      const hardCapMs = hasFirebase ? 10000 : 4500;
+      const hardCapTimer = setTimeout(() => finishBoot("hard-cap"), hardCapMs);
 
       async function finishBoot(reason) {
         if (bootFinished) return;
@@ -1819,9 +1820,8 @@
         console.log(`[開場] 關閉載入畫面 (${reason})`);
 
         try {
-          await loadPickedAuthors();
-          renderInitialNotes();
           updateThrowRemainingLabel();
+          if (markersLayer) renderNotes();
           map.invalidateSize();
         } catch (err) {
           console.warn("[開場] 初始畫面失敗", err);
@@ -1829,19 +1829,39 @@
 
         dismissSplash();
 
-        refreshNotes().catch((err) => console.warn("[背景] 紙條載入失敗", err));
-        locateMe().catch((err) => console.warn("[背景] 定位失敗", err));
+        // 開場逾時強制進入時，背景再補載
+        if (reason === "hard-cap") {
+          if (hasFirebase) {
+            refreshNotes().catch((err) => console.warn("[背景] 紙條載入失敗", err));
+          }
+          locateMe().catch((err) => console.warn("[背景] 定位失敗", err));
+        }
       }
 
       try {
-        // 開場只等 UI 資源；地圖瓦片在 #app 隱藏時可能不載入，不阻塞開場
-        await Promise.race([
+        const uiReady = Promise.race([
           Promise.all([
             Promise.race([document.fonts?.ready ?? Promise.resolve(), delay(1200)]),
             Promise.race([preloadImage("paper_ball.png"), delay(1500)]).catch(() => {})
           ]),
           delay(2000)
         ]);
+
+        const dataReady = hasFirebase
+          ? Promise.race([
+              Promise.all([
+                loadPickedAuthors(),
+                refreshNotes(),
+                Promise.race([locateMe(), delay(5000)])
+              ]),
+              delay(8000)
+            ])
+          : (async () => {
+              await loadPickedAuthors();
+              renderInitialNotes();
+            })();
+
+        await Promise.all([uiReady, dataReady]);
       } catch (err) {
         console.warn("[開場] 資源等待失敗", err);
       }
