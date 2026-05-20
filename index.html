@@ -2979,24 +2979,35 @@
       }
 
       els.pickedCity.textContent = note.city;
-      els.pickedCount.textContent = `${note.pickedCount || 0} 次`;
+      els.pickedCount.textContent = "…";
       updatePickedTimes(note);
       selectedReplies = [];
       els.replyList.innerHTML = '<p class="muted">載入回覆中…</p>';
       updateReplySubmitState();
 
-      if (!isOwn && note.authorUid !== "seed") {
-        recordNotePick(note).catch((err) => {
-          console.error("[撿紙條] 次數更新失敗", err);
-        });
-      }
-
       try {
-        selectedReplies = await loadReplies(note);
-        els.pickedCount.textContent = `${note.pickedCount || 0} 次`;
+        const pickTask = (async () => {
+          if (!isOwn && note.authorUid !== "seed") {
+            try {
+              await recordNotePick(note);
+            } catch (err) {
+              console.error("[撿紙條] 次數更新失敗", err);
+            }
+          }
+          return syncPickCount(note);
+        })();
+
+        const [count, replies] = await Promise.all([
+          pickTask,
+          loadReplies(note)
+        ]);
+        selectedReplies = replies;
+        els.pickedCount.textContent = `${count} 次`;
       } catch (err) {
         console.error("[回覆] 載入失敗", err);
         selectedReplies = [];
+        const count = await syncPickCount(note);
+        els.pickedCount.textContent = `${count} 次`;
       }
       renderReplies();
     }
@@ -3109,7 +3120,10 @@
 
         await Promise.allSettled(
           mine.map(async (note) => {
-            const replies = await loadReplies(note);
+            const [replies] = await Promise.all([
+              loadReplies(note),
+              syncPickCount(note)
+            ]);
             if (requestId !== myNotesRequestId) return;
             const card = cardByNoteId.get(note.id);
             if (!card) return;
@@ -3607,6 +3621,26 @@
         query(collection(db, "note_picks"), where("noteId", "==", noteId))
       );
       return snapshot.size;
+    }
+
+    /** 從 note_picks 集合統計真實撿取次數（notes.pickedCount 欄位不會自動更新） */
+    async function syncPickCount(note) {
+      if (!note?.id) return 0;
+      if (!hasFirebase || note.id.startsWith("seed-")) {
+        return note.pickedCount || 0;
+      }
+      try {
+        await ensureAuth();
+        const count = await getPickCountForNote(note.id);
+        note.pickedCount = count;
+        const idx = notes.findIndex((item) => item.id === note.id);
+        if (idx >= 0) notes[idx].pickedCount = count;
+        if (selectedNote?.id === note.id) selectedNote.pickedCount = count;
+        return count;
+      } catch (err) {
+        console.warn("[撿取] 次數讀取失敗", err);
+        return note.pickedCount || 0;
+      }
     }
 
     async function loadFirebaseNotes() {
