@@ -1453,9 +1453,9 @@
       格式像：1234567890-AbCdEfGh
       留空白 = 直接用網頁版（在 LINE 外面打開也能正常運作）
     */
-    const LIFF_ID = "2010143431-l2kcIl8v";
+    const LIFF_ID = "";
 
-    let hasFirebase = Boolean(
+    const hasFirebase = Boolean(
       firebaseConfig.apiKey &&
       firebaseConfig.authDomain &&
       firebaseConfig.projectId &&
@@ -1502,8 +1502,7 @@
     }
 
     if (hasFirebase) {
-      try {
-        const appModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-app.js");
+      const appModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-app.js");
       const authModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-auth.js");
       const firestoreModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-firestore.js");
       const storageModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-storage.js");
@@ -1523,13 +1522,6 @@
       if (!LIFF_ID || !lineProfile) {
         currentUserId = auth.currentUser.uid;
         localStorage.setItem("jzt_demo_uid", currentUserId);
-      }
-      } catch (err) {
-        console.error("[Firebase] 初始化失敗，改用本機模式", err);
-        hasFirebase = false;
-        firebaseApi = null;
-        db = null;
-        auth = null;
       }
     }
 
