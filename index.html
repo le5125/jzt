@@ -2025,6 +2025,37 @@
         .slice(0, MAP_NOTE_LIMIT);
     }
 
+    function normalizeNote(note) {
+      if (!note?.id) return null;
+      const raw = note.location;
+      if (!raw) return null;
+      const lat = Number(raw.lat ?? raw.latitude);
+      const lng = Number(raw.lng ?? raw.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      return {
+        ...note,
+        location: { lat, lng }
+      };
+    }
+
+    function normalizeNotes(list) {
+      return list.map(normalizeNote).filter(Boolean);
+    }
+
+    function resolveNote(noteOrId) {
+      if (!noteOrId) return null;
+      const id = typeof noteOrId === "string" ? noteOrId : noteOrId.id;
+      if (!id) return null;
+      return notes.find((item) => item.id === id) || (typeof noteOrId === "object" ? noteOrId : null);
+    }
+
+    function escapeHtmlAttr(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
     function cloneNotes(list) {
       return list.map((note) => ({ ...note }));
     }
@@ -2037,37 +2068,50 @@
 
     function mergeNotesById(primary, secondary) {
       const map = new Map();
-      secondary.forEach((note) => map.set(note.id, note));
-      primary.forEach((note) => map.set(note.id, note));
+      normalizeNotes(secondary).forEach((note) => map.set(note.id, note));
+      normalizeNotes(primary).forEach((note) => map.set(note.id, note));
       return sortNotesByActivity([...map.values()]);
     }
 
     /** Firebase 有資料就合併更新；沒有就保留現有／快取，絕不無故清空 */
     function applyNotesOrKeep(freshNotes, fallbackNotes) {
-      if (freshNotes.length > 0) {
-        notes = fallbackNotes.length
-          ? mergeNotesById(freshNotes, fallbackNotes)
-          : sortNotesByActivity(freshNotes);
+      const safeFresh = normalizeNotes(freshNotes);
+      const safeFallback = normalizeNotes(fallbackNotes);
+
+      if (safeFresh.length > 0) {
+        notes = safeFallback.length
+          ? mergeNotesById(safeFresh, safeFallback)
+          : sortNotesByActivity(safeFresh);
         saveNotesCache();
         return true;
       }
-      if (fallbackNotes.length > 0) {
-        notes = fallbackNotes;
+      if (safeFallback.length > 0) {
+        notes = safeFallback;
         return true;
       }
       if (notes.length > 0) return true;
-      return applyNotesCache();
+      if (applyNotesCache()) {
+        notes = normalizeNotes(notes);
+        return notes.length > 0;
+      }
+      return false;
     }
 
     async function ensureNotesLoaded() {
       if (notes.length) return;
-      applyNotesCache();
-      if (notes.length) return;
-      if (!hasFirebase) {
-        notes = loadDemoNotes();
-        if (!notes.length) {
-          notes = [...seedNotes(currentLocation, currentCity), ...notes];
+      if (applyNotesCache()) {
+        notes = normalizeNotes(notes);
+        if (notes.length) {
+          renderNotes();
+          return;
         }
+      }
+      if (!hasFirebase) {
+        notes = normalizeNotes(loadDemoNotes());
+        if (!notes.length) {
+          notes = normalizeNotes([...seedNotes(currentLocation, currentCity), ...notes]);
+        }
+        if (notes.length) renderNotes();
         return;
       }
       await refreshNotes({ background: true });
@@ -2166,7 +2210,9 @@
             if (!notes.length) {
               applyNotesCache();
             }
-            renderNotes();
+            if (notes.length || !markersLayer.getLayers().length) {
+              renderNotes();
+            }
           }
           updateReplyAlert();
           map.invalidateSize();
@@ -2752,88 +2798,114 @@
     async function refreshNotesImpl(options = {}) {
       const { background = false } = options;
       const snapshot = getNotesSnapshot();
+      const snapshotNormalized = normalizeNotes(snapshot);
+      const markerCountBefore = markersLayer?.getLayers().length || 0;
       els.cityText.textContent = currentCity;
 
       try {
         if (hasFirebase) {
           await ensureAuth();
           const loaded = await loadFirebaseNotes();
-          applyNotesOrKeep(loaded, snapshot);
+          applyNotesOrKeep(loaded, snapshotNormalized);
         } else {
-          notes = loadDemoNotes();
+          notes = normalizeNotes(loadDemoNotes());
           if (!notes.length) {
-            notes = [...seedNotes(currentLocation, currentCity), ...notes];
+            notes = normalizeNotes([...seedNotes(currentLocation, currentCity), ...notes]);
           }
         }
       } catch (error) {
         console.error("[紙條] 刷新失敗", error);
-        if (!applyNotesOrKeep([], snapshot) && !background) {
+        if (!applyNotesOrKeep([], snapshotNormalized) && !background) {
           showToast("讀取失敗，顯示快取紙條");
         }
         if (!hasFirebase && !notes.length) {
-          notes = [...seedNotes(currentLocation, currentCity), ...loadDemoNotes()];
+          notes = normalizeNotes([...seedNotes(currentLocation, currentCity), ...loadDemoNotes()]);
         }
       }
 
       if (!hasFirebase && notes.length === 0) {
-        notes = [...seedNotes(currentLocation, currentCity), ...notes];
+        notes = normalizeNotes([...seedNotes(currentLocation, currentCity), ...notes]);
       }
 
+      notes = normalizeNotes(notes);
       notes = sortNotesByActivity(notes);
+
+      if (!notes.length && snapshotNormalized.length) {
+        notes = sortNotesByActivity(snapshotNormalized);
+        console.warn(`[紙條] 刷新後為空，還原 ${notes.length} 張快取紙條`);
+      }
+
       if (notes.length) saveNotesCache();
+
+      if (!notes.length && (snapshotNormalized.length || markerCountBefore > 0)) {
+        console.warn("[紙條] 刷新無資料，保留地圖現狀");
+        updateReplyAlert();
+        return;
+      }
+
       renderNotes();
       updateReplyAlert();
     }
 
     function renderNotes() {
       if (!markersLayer) return;
+
+      const visibleNotes = normalizeNotes(applyFilter(notes));
+      if (!visibleNotes.length) {
+        if (markersLayer.getLayers().length && notes.length > 0) {
+          console.warn("[地圖] 篩選後無可顯示紙條，保留現有標記");
+          return;
+        }
+        markersLayer.clearLayers();
+        els.nearbyAlert.classList.remove("show");
+        return;
+      }
+
       markersLayer.clearLayers();
 
-      // 全台紙條都顯示；篩選器只決定顯示誰的
-      const visibleNotes = applyFilter(notes);
-
       visibleNotes.forEach((note) => {
-        const isMine = isMyNote(note);
-        const isFollowed = isFollowing(note.authorUid);
-        const hasImage = noteHasImage(note);
+        try {
+          const isMine = isMyNote(note);
+          const isFollowed = isFollowing(note.authorUid);
+          const hasImage = noteHasImage(note);
 
-        // 決定 marker class
-        let extraClass = "";
-        if (isMine) extraClass = "mine";
-        else if (isFollowed) extraClass = "followed";
+          let extraClass = "";
+          if (isMine) extraClass = "mine";
+          else if (isFollowed) extraClass = "followed";
 
-        // 決定 marker HTML
-        let markerHtml;
-        let iconSize;
-        if (hasImage) {
-          const thumbUrl = getNoteImageUrls(note)[0].replaceAll('"', "&quot;");
-          markerHtml = `<div class="paper-marker image-marker ${extraClass}"><img src="${thumbUrl}" alt="" loading="lazy" /></div>`;
-          iconSize = 44;
-        } else {
-          // 文字紙條：用 emoji 顯示
-          let emoji = "📃";
-          if (isMine) emoji = "📜";
-          else if (isFollowed) emoji = "📨";  // 追蹤中的人有獨特圖示
-          markerHtml = `<div class="paper-marker ${extraClass}">${emoji}</div>`;
-          iconSize = 36;
+          let markerHtml;
+          let iconSize;
+          if (hasImage) {
+            const thumbUrl = escapeHtmlAttr(getNoteImageUrls(note)[0]);
+            markerHtml = `<div class="paper-marker image-marker ${extraClass}"><img src="${thumbUrl}" alt="" loading="lazy" /></div>`;
+            iconSize = 44;
+          } else {
+            let emoji = "📃";
+            if (isMine) emoji = "📜";
+            else if (isFollowed) emoji = "📨";
+            markerHtml = `<div class="paper-marker ${extraClass}">${emoji}</div>`;
+            iconSize = 36;
+          }
+
+          const marker = L.marker([note.location.lat, note.location.lng], {
+            title: note.content || "圖片紙條",
+            icon: L.divIcon({
+              className: "",
+              html: markerHtml,
+              iconSize: [iconSize, iconSize],
+              iconAnchor: [iconSize / 2, iconSize / 2]
+            })
+          });
+
+          marker.on("click", () => pickNote(note));
+          marker.addTo(markersLayer);
+        } catch (err) {
+          console.warn("[地圖] 略過無法顯示的紙條", note?.id, err);
         }
-
-        const marker = L.marker([note.location.lat, note.location.lng], {
-          title: note.content || "圖片紙條",
-          icon: L.divIcon({
-            className: "",
-            html: markerHtml,
-            iconSize: [iconSize, iconSize],
-            iconAnchor: [iconSize / 2, iconSize / 2]
-          })
-        });
-
-        marker.on("click", () => pickNote(note));
-        marker.addTo(markersLayer);
       });
 
       const nearby = visibleNotes.filter((note) =>
-        note.authorUid !== currentUserId &&
+        !isMyNote(note) &&
         distanceMeters(currentLocation, note.location) <= NEARBY_RADIUS_METERS
       );
       if (nearby.length > 0) {
@@ -2846,7 +2918,7 @@
 
     function pickNearestNote() {
       const nearest = notes
-        .filter((note) => note.authorUid !== currentUserId)
+        .filter((note) => !isMyNote(note))
         .map((note) => ({
           note,
           distance: distanceMeters(currentLocation, note.location)
@@ -2862,7 +2934,13 @@
       pickNote(nearest.note);
     }
 
-    async function pickNote(note) {
+    async function pickNote(noteOrId) {
+      const note = normalizeNote(resolveNote(noteOrId));
+      if (!note) {
+        showToast("找不到這張紙條");
+        return;
+      }
+
       selectedNote = note;
       const isOwn = isMyNote(note);
 
@@ -3180,8 +3258,8 @@
     function applyNotesCache() {
       const cached = loadNotesCache();
       if (!cached) return false;
-      notes = cached;
-      return true;
+      notes = normalizeNotes(cached);
+      return notes.length > 0;
     }
 
     function saveDemoNotes() {
@@ -3560,17 +3638,17 @@
             const lastActivityAt = data.lastActivityAt?.toDate?.().toISOString()
               || data.lastDriftAt?.toDate?.().toISOString()
               || createdAt;
-            return {
+            const loc = data.location;
+            const lat = loc?.latitude ?? loc?.lat;
+            const lng = loc?.longitude ?? loc?.lng;
+            return normalizeNote({
               id: doc.id,
               authorUid: data.authorUid,
               type: data.type,
               content: data.content,
               imageUrl: imageUrls[0] || "",
               imageUrls,
-              location: {
-                lat: data.location.latitude,
-                lng: data.location.longitude
-              },
+              location: { lat, lng },
               city: data.city,
               createdAt,
               lastActivityAt,
@@ -3579,11 +3657,11 @@
               replyCount: data.replyCount || 0,
               reportCount: data.reportCount || 0,
               isSeed: Boolean(data.isSeed)
-            };
-          });
+            });
+          }).filter(Boolean);
 
-          return sortNotesByActivity(all.filter((note) =>
-            note.reportCount < 3 || isMyNote(note)
+          return sortNotesByActivity(all.filter((item) =>
+            item.reportCount < 3 || isMyNote(item)
           ));
         })(), 12000, "紙條載入逾時");
       } catch (err) {
