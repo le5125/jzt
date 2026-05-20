@@ -3290,7 +3290,7 @@
       selectedReplies = [];
       updateReplyEntryCount();
       updateReplySubmitState();
-      startRepliesListener(note);
+      void startRepliesListener(note);
 
       try {
         const count = await (async () => {
@@ -3316,16 +3316,31 @@
       closeReplyComposeDrawer();
       openSheet("replies");
 
-      if (selectedReplies.length || repliesCache.has(selectedNote.id)) {
+      const cached = repliesCache.get(selectedNote.id);
+      if (cached?.length) {
+        selectedReplies = cached;
         renderReplies();
         updateReplyEntryCount();
-      } else {
+      } else if (selectedReplies.length) {
+        renderReplies();
+        updateReplyEntryCount();
+      } else if ((selectedNote.replyCount || 0) > 0) {
         els.replyList.innerHTML = '<p class="muted">載入回覆中…</p>';
+      } else {
+        renderReplies();
       }
 
-      await startRepliesListener(selectedNote);
-      renderReplies();
-      updateReplyEntryCount();
+      try {
+        await startRepliesListener(selectedNote);
+      } catch (err) {
+        console.error("[回覆] 載入失敗", err);
+        if (!selectedReplies.length && (selectedNote.replyCount || 0) > 0) {
+          els.replyList.innerHTML = '<p class="muted">回覆載入失敗，請稍後再試</p>';
+        }
+      } finally {
+        renderRepliesIfOpen();
+        updateReplyEntryCount();
+      }
     }
 
     function updateReplyEntryCount() {
@@ -3912,23 +3927,39 @@
       if (selectedNote?.id !== noteId) return;
       selectedReplies = sorted;
       updateReplyEntryCount();
+      renderRepliesIfOpen();
+    }
+
+    function renderRepliesIfOpen() {
       if (els.replySheet?.classList.contains("open")) {
         renderReplies();
       }
     }
 
+    async function waitForFirebaseReady(maxMs = 6000) {
+      if (db && firebaseApi) return true;
+      if (!hasFirebase) return false;
+      const deadline = Date.now() + maxMs;
+      while (Date.now() < deadline) {
+        await delay(120);
+        if (db && firebaseApi) return true;
+      }
+      return Boolean(db && firebaseApi);
+    }
+
     async function startRepliesListener(note) {
       if (!note?.id) return;
 
-      if (repliesListenerNoteId === note.id && repliesUnsubscribe) {
-        if (repliesCache.has(note.id)) {
-          applyRepliesForNote(note.id, repliesCache.get(note.id));
+      const noteId = note.id;
+
+      if (repliesListenerNoteId === noteId && repliesUnsubscribe) {
+        if (repliesCache.has(noteId)) {
+          applyRepliesForNote(noteId, repliesCache.get(noteId));
         }
         return;
       }
 
       stopRepliesListener();
-      const noteId = note.id;
       repliesListenerNoteId = noteId;
       const token = repliesListenerToken;
 
@@ -3942,57 +3973,85 @@
         return;
       }
 
+      if (!db || !firebaseApi) {
+        const ready = await waitForFirebaseReady();
+        if (!ready || token !== repliesListenerToken) {
+          console.warn("[回覆] Firebase 尚未就緒");
+          applyRepliesForNote(noteId, []);
+          return;
+        }
+      }
+
+      // 先用 getDocs 立即拉資料（LINE WebView 的 onSnapshot 常收不到第一筆）
       try {
         await ensureAuth();
+        if (token !== repliesListenerToken) return;
+        const replies = await loadReplies(note, { skipCache: true });
+        if (token === repliesListenerToken) {
+          applyRepliesForNote(noteId, replies);
+        }
       } catch (err) {
-        console.warn("[回覆] 登入失敗", err);
-        return;
+        console.warn("[回覆] 載入失敗", err);
+        if (token === repliesListenerToken && !repliesCache.has(noteId)) {
+          applyRepliesForNote(noteId, []);
+        }
       }
+
       if (token !== repliesListenerToken) return;
 
-      const { collection, onSnapshot, query, limit } = firebaseApi.firestoreModule;
-      const q = query(collection(db, "notes", noteId, "replies"), limit(50));
-
-      repliesUnsubscribe = onSnapshot(
-        q,
-        (snapshot) => {
-          if (token !== repliesListenerToken) return;
-          applyRepliesForNote(noteId, snapshot.docs.map(mapReplyDoc));
-        },
-        (err) => {
-          if (token !== repliesListenerToken) return;
-          console.warn("[回覆] 即時監聽失敗，改單次載入", err);
-          loadReplies(note).then((replies) => applyRepliesForNote(noteId, replies));
-        }
-      );
+      try {
+        const { collection, onSnapshot, query, limit } = firebaseApi.firestoreModule;
+        const q = query(collection(db, "notes", noteId, "replies"), limit(50));
+        repliesUnsubscribe = onSnapshot(
+          q,
+          (snapshot) => {
+            if (token !== repliesListenerToken) return;
+            applyRepliesForNote(noteId, snapshot.docs.map(mapReplyDoc));
+          },
+          (err) => {
+            console.warn("[回覆] 即時監聽不可用（已載入的回覆不受影響）", err);
+          }
+        );
+      } catch (err) {
+        console.warn("[回覆] 監聽建立失敗", err);
+      }
     }
 
-    async function loadReplies(note) {
+    async function loadReplies(note, options = {}) {
+      const { skipCache = false } = options;
       if (!note?.id) return [];
 
-      if (repliesCache.has(note.id)) {
+      if (!skipCache && repliesCache.has(note.id)) {
         return repliesCache.get(note.id);
       }
 
       if (!hasFirebase || note.id.startsWith("seed-")) {
         const key = `jzt_replies_${note.id}`;
         const local = JSON.parse(localStorage.getItem(key) || "[]");
-        repliesCache.set(note.id, sortReplies(local));
-        return repliesCache.get(note.id);
+        const sorted = sortReplies(local);
+        repliesCache.set(note.id, sorted);
+        return sorted;
       }
 
+      if (!db || !firebaseApi) return repliesCache.get(note.id) || [];
+
       try {
+        await ensureAuth();
         const replies = await withTimeout((async () => {
           const { collection, getDocs, limit, query } = firebaseApi.firestoreModule;
           const snapshot = await getDocs(
             query(collection(db, "notes", note.id, "replies"), limit(50))
           );
           return sortReplies(snapshot.docs.map(mapReplyDoc));
-        })(), 6000, "回覆載入逾時");
+        })(), 8000, "回覆載入逾時");
         repliesCache.set(note.id, replies);
         return replies;
       } catch (err) {
-        console.warn("[回覆] 載入失敗", err);
+        const denied = String(err?.code || err?.message || "").includes("permission");
+        console.warn("[回覆] 讀取失敗", err);
+        if (denied) {
+          console.warn("[回覆] 請在 Firestore 規則加入 notes/{noteId}/replies 的 allow read");
+        }
         return repliesCache.get(note.id) || [];
       }
     }
