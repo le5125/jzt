@@ -360,10 +360,10 @@
     }
     .side-button.locating svg { stroke: var(--paper); }
 
-    /* ========== 底部三欄（固定最下層 UI，抽屜 z-index 較高會蓋住） ========== */
+    /* ========== 底部三欄（固定下方；抽屜 z-index 更高會蓋住） ========== */
     .bottom-bar {
       position: absolute;
-      z-index: 800;
+      z-index: 700;
       left: 0;
       right: 0;
       bottom: 0;
@@ -553,7 +553,7 @@
     /* ========== 底部抽屜 ========== */
     .sheet {
       position: absolute;
-      z-index: 800;
+      z-index: 850;
       left: 8px;
       right: 8px;
       bottom: 0;
@@ -570,8 +570,13 @@
       transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);
     }
     .sheet.open {
-      z-index: 900;
-      transform: translateY(0);
+      z-index: 1000;
+      transform: translateY(0) !important;
+    }
+
+    /* 抽屜開啟時地圖不攔點擊 */
+    #app.has-sheet-open #map {
+      pointer-events: none;
     }
 
     /* 高版抽屜：用於「我的紙條」這種內容多的，撐到接近全螢幕 */
@@ -2435,6 +2440,17 @@
 
     let myNotesLoadToken = 0;
 
+    function resetSheetVisual(sheet) {
+      if (!sheet) return;
+      sheet.classList.remove("dragging");
+      sheet.style.transform = "";
+    }
+
+    function syncAppSheetState() {
+      const anyOpen = Boolean(document.querySelector(".sheet.open"));
+      document.getElementById("app")?.classList.toggle("has-sheet-open", anyOpen);
+    }
+
     function closeSheets(except) {
       const keep = typeof except === "string" ? except : null;
       if (keep !== "throw") els.throwSheet.classList.remove("open");
@@ -2442,15 +2458,19 @@
       if (keep !== "city") els.citySheet.classList.remove("open");
       if (keep !== "nearby") els.nearbySheet.classList.remove("open");
       if (keep !== "myNotes") els.myNotesPage.classList.remove("open");
+      syncAppSheetState();
     }
 
     function openSheet(name) {
       closeSheets(name);
+      [els.throwSheet, els.pickSheet, els.citySheet, els.nearbySheet, els.myNotesPage]
+        .forEach(resetSheetVisual);
       if (name === "throw") els.throwSheet.classList.add("open");
       if (name === "pick") els.pickSheet.classList.add("open");
       if (name === "city") els.citySheet.classList.add("open");
       if (name === "nearby") els.nearbySheet.classList.add("open");
       if (name === "myNotes") els.myNotesPage.classList.add("open");
+      syncAppSheetState();
     }
 
     /*
@@ -2524,6 +2544,9 @@
     }
 
     function showNearbyList() {
+      openSheet("nearby");
+      els.nearbyList.innerHTML = '<p class="muted">載入中…</p>';
+
       const sorted = applyFilter(notes)
         .map((note) => ({ note, distance: distanceMeters(currentLocation, note.location) }))
         .sort((a, b) => a.distance - b.distance)
@@ -2560,8 +2583,6 @@
           els.nearbyList.appendChild(card);
         });
       }
-
-      openSheet("nearby");
     }
 
     function locateMe(options = {}) {
@@ -2729,22 +2750,13 @@
 
     async function pickNote(note) {
       selectedNote = note;
-
       const isOwn = note.authorUid === currentUserId;
-      if (!isOwn && note.authorUid !== "seed") {
-        try {
-          await recordNotePick(note);
-        } catch (err) {
-          console.error("[撿紙條] 次數更新失敗", err);
-          showToast("撿起來了，但次數更新失敗");
-        }
-      }
 
+      openSheet("pick");
       renderPickedNote(note);
       els.pickedAuthor.textContent = isOwn ? `來自我（${nicknameOf(note.authorUid)}）` : `來自 ${nicknameOf(note.authorUid)}`;
       els.pickedAuthor.classList.toggle("mine", isOwn);
 
-      // 追蹤按鈕：只在「別人」的紙條 + 不是 seed 紙條時顯示
       const canFollow = !isOwn && note.authorUid !== "seed";
       els.followButton.hidden = !canFollow;
       if (canFollow) {
@@ -2752,11 +2764,25 @@
       }
 
       els.pickedCity.textContent = note.city;
-      els.pickedCount.textContent = `${note.pickedCount} 次`;
+      els.pickedCount.textContent = `${note.pickedCount || 0} 次`;
       updatePickedTimes(note);
-      selectedReplies = await loadReplies(note);
+      selectedReplies = [];
+      els.replyList.innerHTML = '<p class="muted">載入回覆中…</p>';
+
+      if (!isOwn && note.authorUid !== "seed") {
+        recordNotePick(note).catch((err) => {
+          console.error("[撿紙條] 次數更新失敗", err);
+        });
+      }
+
+      try {
+        selectedReplies = await loadReplies(note);
+        els.pickedCount.textContent = `${note.pickedCount || 0} 次`;
+      } catch (err) {
+        console.error("[回覆] 載入失敗", err);
+        selectedReplies = [];
+      }
       renderReplies();
-      openSheet("pick");
     }
 
     function renderPickedNote(note) {
@@ -3247,32 +3273,39 @@
         return JSON.parse(localStorage.getItem(key) || "[]");
       }
 
-      const {
-        collection,
-        getDocs,
-        limit,
-        orderBy,
-        query
-      } = firebaseApi.firestoreModule;
+      try {
+        return await withTimeout((async () => {
+          const {
+            collection,
+            getDocs,
+            limit,
+            orderBy,
+            query
+          } = firebaseApi.firestoreModule;
 
-      const snapshot = await getDocs(
-        query(
-          collection(db, "notes", note.id, "replies"),
-          orderBy("createdAt", "desc"),
-          limit(30)
-        )
-      );
+          const snapshot = await getDocs(
+            query(
+              collection(db, "notes", note.id, "replies"),
+              orderBy("createdAt", "desc"),
+              limit(30)
+            )
+          );
 
-      return snapshot.docs.map((doc) => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          authorUid: data.authorUid,
-          type: data.type,
-          content: data.content,
-          createdAt: data.createdAt?.toDate?.().toISOString() || new Date().toISOString()
-        };
-      });
+          return snapshot.docs.map((doc) => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              authorUid: data.authorUid,
+              type: data.type,
+              content: data.content,
+              createdAt: data.createdAt?.toDate?.().toISOString() || new Date().toISOString()
+            };
+          });
+        })(), 8000, "回覆載入逾時");
+      } catch (err) {
+        console.warn("[回覆] 載入失敗", err);
+        return [];
+      }
     }
 
     async function loadPickCountsByNoteId() {
