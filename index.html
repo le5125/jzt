@@ -1610,7 +1610,7 @@
     const NEARBY_RADIUS_METERS = 1000;  // 僅用於「附近提示」與一鍵撿最近的紙條
     let markersLayer = null;
     let userMarker = null;
-    let pickedAuthorUids = new Set();
+    let pickedNoteIds = new Set();
 
     const els = {
       cityButton: document.querySelector("#cityButton"),
@@ -1843,14 +1843,14 @@
 
         dismissSplash();
 
-        syncPickedAuthorsFromFirebase().catch((err) => console.warn("[背景] 撿記錄同步失敗", err));
+        syncPickedNotesFromFirebase().catch((err) => console.warn("[背景] 撿記錄同步失敗", err));
         locateMe({ refreshAfter: false }).catch((err) => console.warn("[背景] 定位失敗", err));
         if (reason === "hard-cap" && hasFirebase) {
           refreshNotes({ background: true }).catch((err) => console.warn("[背景] 紙條載入失敗", err));
         }
       }
 
-      loadPickedAuthorsLocal();
+      loadPickedNotesLocal();
       const hadCache = hasFirebase && applyNotesCache();
       if (hadCache) {
         els.cityText.textContent = currentCity;
@@ -1867,7 +1867,7 @@
                   delay(hadCache ? 2500 : 4000)
                 ])
               : (async () => {
-                  await loadPickedAuthorsLocal();
+                  await loadPickedNotesLocal();
                   renderInitialNotes();
                 })()
           ]),
@@ -2426,14 +2426,14 @@
     async function pickNote(note) {
       selectedNote = note;
 
-      // 自己撿自己的紙條不算次數；同一位作者也只算第一次
       const isOwn = note.authorUid === currentUserId;
-      const alreadyPickedAuthor = hasPickedAuthorBefore(note.authorUid);
-      if (!isOwn && !alreadyPickedAuthor && note.authorUid !== "seed") {
-        note.pickedCount += 1;
-        await updatePickedCount(note);
-        saveDemoNotes();
-        await markAuthorAsPicked(note.authorUid);
+      if (!isOwn && note.authorUid !== "seed") {
+        try {
+          await recordNotePick(note);
+        } catch (err) {
+          console.error("[撿紙條] 次數更新失敗", err);
+          showToast("撿起來了，但次數更新失敗");
+        }
       }
 
       renderPickedNote(note);
@@ -2895,6 +2895,29 @@
       });
     }
 
+    async function loadPickCountsByNoteId() {
+      if (!hasFirebase) return {};
+      const { collection, getDocs } = firebaseApi.firestoreModule;
+      const snapshot = await getDocs(collection(db, "note_picks"));
+      const counts = {};
+      snapshot.forEach((docSnap) => {
+        const noteId = docSnap.data().noteId;
+        if (noteId) counts[noteId] = (counts[noteId] || 0) + 1;
+      });
+      return counts;
+    }
+
+    async function getPickCountForNote(noteId) {
+      if (!hasFirebase || noteId.startsWith("seed-")) {
+        return notes.find((item) => item.id === noteId)?.pickedCount || 0;
+      }
+      const { collection, query, where, getDocs } = firebaseApi.firestoreModule;
+      const snapshot = await getDocs(
+        query(collection(db, "note_picks"), where("noteId", "==", noteId))
+      );
+      return snapshot.size;
+    }
+
     async function loadFirebaseNotes() {
       const {
         collection,
@@ -2904,13 +2927,16 @@
         query
       } = firebaseApi.firestoreModule;
 
-      const snapshot = await getDocs(
-        query(
-          collection(db, "notes"),
-          orderBy("createdAt", "desc"),
-          limit(100)
-        )
-      );
+      const [snapshot, pickCounts] = await Promise.all([
+        getDocs(
+          query(
+            collection(db, "notes"),
+            orderBy("createdAt", "desc"),
+            limit(100)
+          )
+        ),
+        loadPickCountsByNoteId()
+      ]);
 
       const all = snapshot.docs.map((doc) => {
         const data = doc.data();
@@ -2927,7 +2953,7 @@
           city: data.city,
           createdAt: data.createdAt?.toDate?.().toISOString() || new Date().toISOString(),
           expiresAt: data.expiresAt?.toDate?.().toISOString() || addDays(new Date(), 30).toISOString(),
-          pickedCount: data.pickedCount || 0,
+          pickedCount: pickCounts[doc.id] ?? (data.pickedCount || 0),
           replyCount: data.replyCount || 0,
           reportCount: data.reportCount || 0,
           isSeed: Boolean(data.isSeed)
@@ -2958,12 +2984,9 @@
       });
     }
 
+    // 舊版直接改 notes.pickedCount，Firestore 規則通常不允許；改由 note_picks 統計
     async function updatePickedCount(note) {
-      if (!hasFirebase || note.id.startsWith("seed-")) return;
-      const { doc, increment, updateDoc } = firebaseApi.firestoreModule;
-      await updateDoc(doc(db, "notes", note.id), {
-        pickedCount: increment(1)
-      });
+      return recordNotePick(note);
     }
 
     async function reverseCity(location) {
@@ -3046,68 +3069,97 @@
       return `${adj}${ani} #${num}`;
     }
 
-    /*
-      ============= 撿紙條計次 =============
-      同一位作者只算一次；有 Firebase 時用 line_xxx 同步到雲端，換手機也記得
-    */
-    function pickedAuthorsStorageKey() {
-      return `jzt_picked_authors_${currentUserId}`;
+    async function recordNotePick(note) {
+      if (hasPickedNoteBefore(note.id)) return false;
+
+      if (hasFirebase && !note.id.startsWith("seed-")) {
+        const { doc, setDoc, serverTimestamp } = firebaseApi.firestoreModule;
+        await setDoc(doc(db, "note_picks", `${note.id}_${currentUserId}`), {
+          noteId: note.id,
+          pickerUid: currentUserId,
+          authorUid: note.authorUid,
+          pickedAt: serverTimestamp()
+        });
+        note.pickedCount = await getPickCountForNote(note.id);
+        saveNotesCache();
+      } else {
+        note.pickedCount = (note.pickedCount || 0) + 1;
+        saveDemoNotes();
+      }
+
+      pickedNoteIds.add(note.id);
+      savePickedNotesLocal();
+      await syncPickedNoteMark(note.id);
+      return true;
     }
 
-    function savePickedAuthorsLocal() {
+    /*
+      ============= 撿紙條計次 =============
+      同一張紙條，同一人只算一次；次數存在 note_picks 集合（誰都能新增自己的撿取紀錄）
+    */
+    function pickedNotesStorageKey() {
+      return `jzt_picked_notes_${currentUserId}`;
+    }
+
+    function savePickedNotesLocal() {
       localStorage.setItem(
-        pickedAuthorsStorageKey(),
-        JSON.stringify([...pickedAuthorUids])
+        pickedNotesStorageKey(),
+        JSON.stringify([...pickedNoteIds])
       );
     }
 
-    function loadPickedAuthorsLocal() {
-      pickedAuthorUids = new Set();
+    function loadPickedNotesLocal() {
+      pickedNoteIds = new Set();
       try {
-        JSON.parse(localStorage.getItem(pickedAuthorsStorageKey()) || "[]")
-          .forEach((uid) => pickedAuthorUids.add(uid));
+        JSON.parse(localStorage.getItem(pickedNotesStorageKey()) || "[]")
+          .forEach((noteId) => pickedNoteIds.add(noteId));
       } catch {}
     }
 
-    async function syncPickedAuthorsFromFirebase() {
+    async function syncPickedNotesFromFirebase() {
       if (!hasFirebase) return;
 
       try {
-        const { doc, getDoc } = firebaseApi.firestoreModule;
-        const snap = await getDoc(doc(db, "users", currentUserId));
-        if (snap.exists()) {
-          (snap.data().pickedAuthorUids || []).forEach((uid) => pickedAuthorUids.add(uid));
+        const { collection, doc, getDoc, getDocs, query, where } = firebaseApi.firestoreModule;
+        const snap = await getDocs(
+          query(collection(db, "note_picks"), where("pickerUid", "==", currentUserId))
+        );
+        snap.forEach((docSnap) => {
+          const noteId = docSnap.data().noteId;
+          if (noteId) pickedNoteIds.add(noteId);
+        });
+
+        const userSnap = await getDoc(doc(db, "users", currentUserId));
+        if (userSnap.exists()) {
+          (userSnap.data().pickedNoteIds || []).forEach((noteId) => pickedNoteIds.add(noteId));
         }
-        savePickedAuthorsLocal();
+        savePickedNotesLocal();
       } catch (err) {
         console.warn("[撿記錄] Firebase 讀取失敗，使用本機", err);
       }
     }
 
     async function loadPickedAuthors() {
-      loadPickedAuthorsLocal();
-      await syncPickedAuthorsFromFirebase();
+      loadPickedNotesLocal();
+      await syncPickedNotesFromFirebase();
     }
 
-    function hasPickedAuthorBefore(authorUid) {
-      return pickedAuthorUids.has(authorUid);
+    function hasPickedNoteBefore(noteId) {
+      return pickedNoteIds.has(noteId);
     }
 
-    async function markAuthorAsPicked(authorUid) {
-      pickedAuthorUids.add(authorUid);
-      savePickedAuthorsLocal();
-
-      if (!hasFirebase || authorUid === "seed") return;
+    async function syncPickedNoteMark(noteId) {
+      if (!hasFirebase) return;
 
       try {
         const { doc, setDoc, arrayUnion } = firebaseApi.firestoreModule;
         await setDoc(
           doc(db, "users", currentUserId),
-          { pickedAuthorUids: arrayUnion(authorUid) },
+          { pickedNoteIds: arrayUnion(noteId) },
           { merge: true }
         );
       } catch (err) {
-        console.warn("[撿記錄] Firebase 寫入失敗", err);
+        console.warn("[撿記錄] 使用者紀錄寫入失敗", err);
       }
     }
 
