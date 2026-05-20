@@ -565,7 +565,8 @@
       border: 2.5px solid var(--ink);
       border-bottom: 0;
       box-shadow: 0 -4px 0 var(--ink);
-      overflow: auto;
+      overflow-x: hidden;
+      overflow-y: auto;
       transform: translateY(110%);
       transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);
     }
@@ -584,7 +585,14 @@
 
     #pickSheet {
       max-height: min(88vh, 680px);
-      padding-bottom: calc(120px + env(safe-area-inset-bottom));
+    }
+
+    #replySheet {
+      max-height: calc(100vh - 16px);
+      min-height: 88vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
 
     /* 高版抽屜：用於「我的紙條」這種內容多的，撐到接近全螢幕 */
@@ -657,6 +665,29 @@
       box-shadow: 0 0 0 var(--ink);
     }
 
+    .back-button {
+      width: 40px;
+      height: 40px;
+      border: 2.5px solid var(--ink);
+      border-radius: 50% 48% 52% 50%;
+      background: var(--paper);
+      color: var(--ink);
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1;
+      box-shadow: 2px 3px 0 var(--ink);
+      flex-shrink: 0;
+    }
+    .back-button:active {
+      transform: translate(2px, 3px);
+      box-shadow: 0 0 0 var(--ink);
+    }
+
+    .sheet-header-with-back h2 {
+      flex: 1;
+      text-align: center;
+    }
+
     /* ========== 表單元素 ========== */
     textarea, input[type="text"], input:not([type]), input[type="search"] {
       width: 100%;
@@ -704,6 +735,11 @@
       display: grid;
       gap: 16px;
       margin-top: 18px;
+    }
+
+    .picked-note {
+      overflow-x: hidden;
+      max-width: 100%;
     }
 
     .city-search {
@@ -853,6 +889,9 @@
       line-height: 2.0;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
+      overflow-x: hidden;
+      max-width: 100%;
+      box-sizing: border-box;
       font-size: 18px;
       color: var(--ink);
       font-family: "Caveat", "Patrick Hand", "Noto Sans TC", serif;
@@ -904,24 +943,56 @@
       overflow-wrap: anywhere;
     }
 
-    .reply-panel {
-      display: grid;
-      gap: 14px;
+    .reply-entry-button {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 4px;
     }
-    .reply-panel h3 {
-      margin: 4px 0 0;
-      font-family: "Caveat", cursive;
-      font-size: 22px;
-      color: var(--ink);
-      letter-spacing: 0.05em;
-      transform: rotate(-1deg);
+    .reply-entry-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 28px;
+      height: 28px;
+      padding: 0 8px;
+      border: 2.5px solid var(--ink);
+      border-radius: 999px;
+      background: var(--paper);
+      font-size: 14px;
+      font-weight: 900;
+      line-height: 1;
     }
 
     .reply-list {
       display: grid;
       gap: 10px;
       max-height: 200px;
-      overflow: auto;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+    .reply-list-full {
+      flex: 1;
+      min-height: 0;
+      max-height: none;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: 8px;
+    }
+
+    .reply-compose {
+      flex-shrink: 0;
+      border-top: 2.5px dashed var(--ink);
+      padding-top: 14px;
+      margin-top: auto;
+      display: grid;
+      gap: 12px;
+    }
+    .reply-compose .reply-form {
+      margin-top: 0;
     }
 
     .reply-card {
@@ -932,9 +1003,12 @@
       border-radius: 10px 14px 11px 12px;
       background: var(--paper);
       box-shadow: 2px 3px 0 var(--ink);
-      transform: rotate(-0.3deg);
+      max-width: 100%;
+      overflow-wrap: anywhere;
     }
-    .reply-card:nth-child(2n) { transform: rotate(0.4deg); }
+    .reply-list-full .reply-card {
+      transform: none;
+    }
     .reply-card p {
       margin: 0;
       line-height: 1.6;
@@ -1465,31 +1539,10 @@
             <dd id="pickedUpdatedTime">—</dd>
           </div>
         </dl>
-        <section class="reply-panel" aria-label="回覆">
-          <h3>續寫回覆</h3>
-          <div id="replyList" class="reply-list">
-            <p class="muted">還沒有回覆，當第一個吧。</p>
-          </div>
-
-          <form id="replyForm" class="reply-form">
-            <textarea id="replyInput" maxlength="140" rows="3" placeholder="寫一則回覆⋯"></textarea>
-            <div class="sheet-row">
-              <span id="replyCountText" class="muted">140 字</span>
-              <button id="submitReplyButton" class="primary-button" type="submit" disabled>送出</button>
-            </div>
-          </form>
-
-          <div>
-            <p class="muted" style="margin-bottom:8px">貼圖回覆</p>
-            <div id="stickerRow" class="sticker-row">
-              <button class="sticker-button" type="button" data-sticker="👍">👍</button>
-              <button class="sticker-button" type="button" data-sticker="❤️">❤️</button>
-              <button class="sticker-button" type="button" data-sticker="😂">😂</button>
-              <button class="sticker-button" type="button" data-sticker="🥹">🥹</button>
-              <button class="sticker-button" type="button" data-sticker="🌟">🌟</button>
-            </div>
-          </div>
-        </section>
+        <button id="openRepliesButton" class="reply-entry-button secondary-button" type="button">
+          <span>查看回覆</span>
+          <span id="replyEntryCount" class="reply-entry-badge">0</span>
+        </button>
 
         <!-- 底部：分享 + 檢舉 -->
         <div class="pick-actions">
@@ -1526,6 +1579,37 @@
         </div>
       </div>
     </div>
+
+    <!-- 回覆全頁（像 FB 留言） -->
+    <section id="replySheet" class="sheet sheet-tall" aria-label="回覆">
+      <header class="sheet-header sheet-header-with-back">
+        <button id="replyBackButton" class="back-button" type="button" aria-label="返回">←</button>
+        <h2>回覆</h2>
+        <button class="close-button" type="button" data-close>×</button>
+      </header>
+      <div id="replyList" class="reply-list reply-list-full">
+        <p class="muted">載入回覆中…</p>
+      </div>
+      <div class="reply-compose">
+        <form id="replyForm" class="reply-form">
+          <textarea id="replyInput" maxlength="140" rows="4" placeholder="寫一則回覆⋯"></textarea>
+          <div class="sheet-row">
+            <span id="replyCountText" class="muted">140 字</span>
+            <button id="submitReplyButton" class="primary-button" type="submit" disabled>送出</button>
+          </div>
+        </form>
+        <div>
+          <p class="muted" style="margin-bottom:8px">貼圖回覆</p>
+          <div id="stickerRow" class="sticker-row">
+            <button class="sticker-button" type="button" data-sticker="👍">👍</button>
+            <button class="sticker-button" type="button" data-sticker="❤️">❤️</button>
+            <button class="sticker-button" type="button" data-sticker="😂">😂</button>
+            <button class="sticker-button" type="button" data-sticker="🥹">🥹</button>
+            <button class="sticker-button" type="button" data-sticker="🌟">🌟</button>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- 我的紙條抽屜（可下滑關閉） -->
     <section id="myNotesPage" class="sheet sheet-tall" aria-label="我的紙條">
@@ -1800,6 +1884,10 @@
       pickedCount: document.querySelector("#pickedCount"),
       pickedCreatedTime: document.querySelector("#pickedCreatedTime"),
       pickedUpdatedTime: document.querySelector("#pickedUpdatedTime"),
+      openRepliesButton: document.querySelector("#openRepliesButton"),
+      replyEntryCount: document.querySelector("#replyEntryCount"),
+      replySheet: document.querySelector("#replySheet"),
+      replyBackButton: document.querySelector("#replyBackButton"),
       replyList: document.querySelector("#replyList"),
       replyForm: document.querySelector("#replyForm"),
       replyInput: document.querySelector("#replyInput"),
@@ -2110,6 +2198,35 @@
       if (notes.length) saveNotesCache();
       renderNotes();
       updateReplyAlert();
+      enrichNotesWithPickCounts(notes).then((changed) => {
+        if (!changed) return;
+        saveNotesCache();
+        renderNotes();
+        if (selectedNote) {
+          const fresh = notes.find((item) => item.id === selectedNote.id);
+          if (fresh) {
+            selectedNote.pickedCount = fresh.pickedCount;
+            if (els.pickedCount) els.pickedCount.textContent = `${fresh.pickedCount || 0} 次`;
+          }
+        }
+      });
+    }
+
+    async function enrichNotesWithPickCounts(notesList) {
+      if (!hasFirebase || !notesList.length) return false;
+      const counts = await loadPickCountsByNoteId();
+      if (!Object.keys(counts).length) return false;
+      let changed = false;
+      notesList.forEach((note) => {
+        const fromPicks = counts[note.id];
+        if (fromPicks == null) return;
+        const next = Math.max(note.pickedCount || 0, fromPicks);
+        if (next !== (note.pickedCount || 0)) {
+          note.pickedCount = next;
+          changed = true;
+        }
+      });
+      return changed;
     }
 
     function buildNotesQuery() {
@@ -2383,6 +2500,11 @@
     els.openThrowButton.addEventListener("click", () => openSheet("throw"));
     els.myNotesButton.addEventListener("click", () => showMyNotes({ repliesOnly: false }));
     els.replyAlert.addEventListener("click", () => showMyNotes({ repliesOnly: true }));
+    els.openRepliesButton.addEventListener("click", () => openRepliesSheet());
+    els.replyBackButton.addEventListener("click", () => {
+      if (selectedNote) openSheet("pick");
+      else closeSheets();
+    });
     els.nearbyListButton.addEventListener("click", showNearbyList);
     els.nearbyAlert.addEventListener("click", pickNearestNote);
     els.replyInput.addEventListener("input", () => {
@@ -2691,18 +2813,20 @@
       if (keep !== "city") els.citySheet.classList.remove("open");
       if (keep !== "nearby") els.nearbySheet.classList.remove("open");
       if (keep !== "myNotes") els.myNotesPage.classList.remove("open");
+      if (keep !== "replies") els.replySheet.classList.remove("open");
       syncAppSheetState();
     }
 
     function openSheet(name) {
       closeSheets(name);
-      [els.throwSheet, els.pickSheet, els.citySheet, els.nearbySheet, els.myNotesPage]
+      [els.throwSheet, els.pickSheet, els.citySheet, els.nearbySheet, els.myNotesPage, els.replySheet]
         .forEach(resetSheetVisual);
       if (name === "throw") els.throwSheet.classList.add("open");
       if (name === "pick") els.pickSheet.classList.add("open");
       if (name === "city") els.citySheet.classList.add("open");
       if (name === "nearby") els.nearbySheet.classList.add("open");
       if (name === "myNotes") els.myNotesPage.classList.add("open");
+      if (name === "replies") els.replySheet.classList.add("open");
       syncAppSheetState();
     }
 
@@ -2982,7 +3106,7 @@
       els.pickedCount.textContent = "…";
       updatePickedTimes(note);
       selectedReplies = [];
-      els.replyList.innerHTML = '<p class="muted">載入回覆中…</p>';
+      updateReplyEntryCount();
       updateReplySubmitState();
 
       try {
@@ -3003,13 +3127,33 @@
         ]);
         selectedReplies = replies;
         els.pickedCount.textContent = `${count} 次`;
+        updateReplyEntryCount();
       } catch (err) {
         console.error("[回覆] 載入失敗", err);
         selectedReplies = [];
         const count = await syncPickCount(note);
         els.pickedCount.textContent = `${count} 次`;
+        updateReplyEntryCount();
       }
+    }
+
+    async function openRepliesSheet() {
+      if (!selectedNote) return;
+      openSheet("replies");
+      els.replyList.innerHTML = '<p class="muted">載入回覆中…</p>';
+      try {
+        selectedReplies = await loadReplies(selectedNote);
+      } catch (err) {
+        console.error("[回覆] 載入失敗", err);
+        selectedReplies = [];
+      }
+      updateReplyEntryCount();
       renderReplies();
+    }
+
+    function updateReplyEntryCount() {
+      const count = selectedReplies.length || selectedNote?.replyCount || 0;
+      if (els.replyEntryCount) els.replyEntryCount.textContent = String(count);
     }
 
     function renderPickedNote(note) {
@@ -3049,6 +3193,7 @@
         }
         els.pickedCount.textContent = `${selectedNote.pickedCount} 次`;
         updatePickedTimes(selectedNote);
+        updateReplyEntryCount();
         renderReplies();
         renderNotes();
         updateReplyAlert();
@@ -3066,7 +3211,7 @@
     function renderReplies() {
       els.replyList.innerHTML = "";
       if (!selectedReplies.length) {
-        els.replyList.innerHTML = '<p class="muted">還沒有回覆，當第一個吧。</p>';
+        els.replyList.innerHTML = '<p class="muted">還沒有回覆，當第一個留言吧。</p>';
         return;
       }
 
@@ -3623,7 +3768,7 @@
       return snapshot.size;
     }
 
-    /** 從 note_picks 集合統計真實撿取次數（notes.pickedCount 欄位不會自動更新） */
+    /** 從 notes 文件讀 pickedCount，並以 note_picks 統計補舊資料 */
     async function syncPickCount(note) {
       if (!note?.id) return 0;
       if (!hasFirebase || note.id.startsWith("seed-")) {
@@ -3631,7 +3776,19 @@
       }
       try {
         await ensureAuth();
-        const count = await getPickCountForNote(note.id);
+        const { doc, getDoc } = firebaseApi.firestoreModule;
+        const snap = await getDoc(doc(db, "notes", note.id));
+        let count = snap.exists() ? (snap.data().pickedCount || 0) : (note.pickedCount || 0);
+
+        if (count === 0) {
+          try {
+            const fromPicks = await getPickCountForNote(note.id);
+            if (fromPicks > count) count = fromPicks;
+          } catch (err) {
+            console.warn("[撿取] note_picks 統計失敗", err);
+          }
+        }
+
         note.pickedCount = count;
         const idx = notes.findIndex((item) => item.id === note.id);
         if (idx >= 0) notes[idx].pickedCount = count;
@@ -3674,7 +3831,7 @@
       });
     }
 
-    // 舊版直接改 notes.pickedCount，Firestore 規則通常不允許；改由 note_picks 統計
+    // 撿取時 increment notes.pickedCount（規則允許更新計數欄位），並以 note_picks 作備援統計
     async function updatePickedCount(note) {
       return recordNotePick(note);
     }
@@ -3760,17 +3917,28 @@
     }
 
     async function recordNotePick(note) {
-      if (hasPickedNoteBefore(note.id)) return false;
+      if (hasPickedNoteBefore(note.id)) {
+        await syncPickCount(note);
+        return false;
+      }
 
       if (hasFirebase && !note.id.startsWith("seed-")) {
-        const { doc, setDoc, serverTimestamp } = firebaseApi.firestoreModule;
+        const { doc, setDoc, updateDoc, increment, serverTimestamp } = firebaseApi.firestoreModule;
         await setDoc(doc(db, "note_picks", `${note.id}_${currentUserId}`), {
           noteId: note.id,
           pickerUid: currentUserId,
           authorUid: note.authorUid,
           pickedAt: serverTimestamp()
         });
-        note.pickedCount = await getPickCountForNote(note.id);
+        try {
+          await updateDoc(doc(db, "notes", note.id), {
+            pickedCount: increment(1)
+          });
+          note.pickedCount = (note.pickedCount || 0) + 1;
+        } catch (err) {
+          console.warn("[撿取] notes.pickedCount 更新失敗", err);
+          note.pickedCount = await getPickCountForNote(note.id);
+        }
         saveNotesCache();
       } else {
         note.pickedCount = (note.pickedCount || 0) + 1;
