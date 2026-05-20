@@ -94,9 +94,7 @@
     }
 
     /* ========== 開場動畫 ========== */
-    /* 進入時蓋一張全螢幕「信鴿叼紙條飛過」動畫
-       1.2 秒後自動淡出消失，使用者看不到資料載入的閃爍
-       使用者也可以點任何地方提早關閉 */
+    /* 進入時蓋全螢幕，等首頁資源就緒後自動淡出 */
     .splash {
       position: fixed;
       inset: 0;
@@ -110,11 +108,10 @@
       align-items: center;
       justify-content: center;
       gap: 16px;
-      cursor: pointer;
+      pointer-events: none;
     }
-    /* 資源就緒後才淡出；使用者點擊也能提早關閉 */
-    .splash.ready,
-    .splash.dismissed {
+    /* 首頁載入完成後自動淡出 */
+    .splash.ready {
       animation: splashFade 0.4s ease-out forwards;
     }
     @keyframes splashFade {
@@ -173,15 +170,6 @@
       letter-spacing: 0.2em;
       margin: 0;
       animation: splashTitle 0.5s ease-out 0.4s both;
-    }
-
-    .splash-skip {
-      position: absolute;
-      bottom: 32px;
-      font-size: 12px;
-      color: var(--muted);
-      letter-spacing: 0.15em;
-      animation: splashTitle 0.5s ease-out 0.6s both;
     }
 
     /* ========== 地圖 ========== */
@@ -1215,7 +1203,7 @@
 </head>
 
 <body class="is-booting">
-  <!-- ============= 開場動畫（等資源就緒後淡出；點任意處可提早關） ============= -->
+  <!-- ============= 開場動畫（首頁載入完成後自動關閉） ============= -->
   <div class="splash" id="splash" aria-hidden="false">
     <div class="splash-scene" aria-hidden="true">
       <!-- 信鴿叼著紙條飛過 -->
@@ -1246,7 +1234,6 @@
     </div>
     <h1 class="splash-title">丟紙條</h1>
     <p class="splash-subtitle">在地圖上輕輕放下一句話</p>
-    <p class="splash-skip">點任意處跳過</p>
   </div>
 
   <main id="app">
@@ -1725,8 +1712,6 @@
     // 為什麼這樣做：splash 動畫期間 z-index 9999 蓋著畫面，Leaflet 可能拿到
     // 錯的容器尺寸；動畫結束時 invalidateSize() 強迫它重算。
     const splashEl = document.querySelector("#splash");
-    let appReady = false;
-    let splashDismissRequested = false;
 
     function fixMapSize(label) {
       map.invalidateSize();
@@ -1734,21 +1719,13 @@
     }
 
     function dismissSplash() {
-      if (!appReady) return;
       splashEl?.classList.add("ready");
       splashEl?.setAttribute("aria-hidden", "true");
       document.body.classList.remove("is-booting");
       setTimeout(() => fixMapSize("splash-dismiss"), 450);
     }
 
-    function requestSplashDismiss() {
-      splashDismissRequested = true;
-      splashEl?.classList.add("dismissed");
-      if (appReady) dismissSplash();
-    }
-
     if (splashEl) {
-      splashEl.addEventListener("click", requestSplashDismiss);
       splashEl.addEventListener("animationend", () => fixMapSize("animationend"));
     }
 
@@ -1797,14 +1774,11 @@
       updateThrowRemainingLabel();
       map.invalidateSize();
 
-      if (!splashDismissRequested) {
-        const elapsed = performance.now() - bootStart;
-        if (elapsed < MIN_SPLASH_MS) {
-          await delay(MIN_SPLASH_MS - elapsed);
-        }
+      const elapsed = performance.now() - bootStart;
+      if (elapsed < MIN_SPLASH_MS) {
+        await delay(MIN_SPLASH_MS - elapsed);
       }
 
-      appReady = true;
       dismissSplash();
     }
 
