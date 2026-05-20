@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#fbeed4" />
-  <title>丟紙條12</title>
+  <title>丟紙條 · 法式繪本</title>
 
   <!-- 法式繪本字體：Caveat（手寫流暢）+ Patrick Hand（手寫工整）+ 思源中文 -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -1453,9 +1453,9 @@
       格式像：1234567890-AbCdEfGh
       留空白 = 直接用網頁版（在 LINE 外面打開也能正常運作）
     */
-    const LIFF_ID = "";
+    const LIFF_ID = "2010143431-l2kcIl8v";
 
-    const hasFirebase = Boolean(
+    let hasFirebase = Boolean(
       firebaseConfig.apiKey &&
       firebaseConfig.authDomain &&
       firebaseConfig.projectId &&
@@ -1502,7 +1502,8 @@
     }
 
     if (hasFirebase) {
-      const appModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-app.js");
+      try {
+        const appModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-app.js");
       const authModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-auth.js");
       const firestoreModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-firestore.js");
       const storageModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-storage.js");
@@ -1523,6 +1524,13 @@
         currentUserId = auth.currentUser.uid;
         localStorage.setItem("jzt_demo_uid", currentUserId);
       }
+      } catch (err) {
+        console.error("[Firebase] 初始化失敗，改用本機模式", err);
+        hasFirebase = false;
+        firebaseApi = null;
+        db = null;
+        auth = null;
+      }
     }
 
     const taipei = { lat: 25.033, lng: 121.5654 };
@@ -1531,6 +1539,7 @@
     let notes = loadDemoNotes();
     let selectedNote = null;
     let selectedReplies = [];
+    let currentFilter = "all";
     let markersLayer = null;
     let userMarker = null;
 
@@ -2032,7 +2041,6 @@
       currentFilter: "all" | "following" | "mine"
       切換後立即重畫 marker
     */
-    let currentFilter = "all";
     document.querySelectorAll(".filter-pill").forEach((btn) => {
       btn.addEventListener("click", () => {
         document.querySelectorAll(".filter-pill").forEach((b) => b.classList.remove("active"));
