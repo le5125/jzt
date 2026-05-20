@@ -1520,29 +1520,21 @@
     let lineProfile = null;   // 將存放 { userId, displayName, pictureUrl } 之類資訊（可選用途）
     let inLiff = false;
 
-    if (LIFF_ID && typeof liff !== "undefined") {
+    async function initLiff() {
+      if (!LIFF_ID || typeof liff === "undefined") return;
       try {
         await Promise.race([
           liff.init({ liffId: LIFF_ID }),
-          delay(5000)
+          delay(4000)
         ]);
         inLiff = liff.isInClient();
         console.log("[LIFF] 初始化完成，inClient =", inLiff);
 
-        // 如果使用者還沒 login（一般網頁開啟 LIFF URL 時會發生），引導他登入
         if (!liff.isLoggedIn()) {
-          // C 方案：登入是可選的——只有當使用者要綁定身份時才登入
-          // 預設不強迫登入，這樣陌生人點連結進來也能立刻看地圖
           console.log("[LIFF] 未登入，使用匿名模式");
         } else {
-          // 如果已經登入，把 LINE userId 當做穩定 UID
-          // 這樣同一個人不同裝置打開 LIFF 都會是同一個 ID
           const profile = await liff.getProfile();
           lineProfile = profile;
-          // 用 LINE userId 取代隨機 localStorage UID
-          // 注意：這只是「ID 的來源」改變，不會洩漏給其他人
-          currentUserId = `line_${profile.userId}`;
-          localStorage.setItem("jzt_demo_uid", currentUserId);
           console.log("[LIFF] 已登入，userId =", profile.userId.slice(0, 6) + "...");
         }
       } catch (err) {
@@ -1550,32 +1542,26 @@
       }
     }
 
-    if (hasFirebase) {
+    async function initFirebase() {
+      if (!hasFirebase) return;
       try {
-        const appModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-app.js");
-      const authModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-auth.js");
-      const firestoreModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-firestore.js");
-      const storageModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-storage.js");
+        const [appModule, authModule, firestoreModule, storageModule] = await Promise.all([
+          import("https://www.gstatic.com/firebasejs/11.2.0/firebase-app.js"),
+          import("https://www.gstatic.com/firebasejs/11.2.0/firebase-auth.js"),
+          import("https://www.gstatic.com/firebasejs/11.2.0/firebase-firestore.js"),
+          import("https://www.gstatic.com/firebasejs/11.2.0/firebase-storage.js")
+        ]);
 
-      const app = appModule.initializeApp(firebaseConfig);
-      auth = authModule.getAuth(app);
-      db = firestoreModule.getFirestore(app);
-      const storage = storageModule.getStorage(app);
-      firebaseApi = { authModule, firestoreModule, storageModule, storage };
+        const app = appModule.initializeApp(firebaseConfig);
+        auth = authModule.getAuth(app);
+        db = firestoreModule.getFirestore(app);
+        const storage = storageModule.getStorage(app);
+        firebaseApi = { authModule, firestoreModule, storageModule, storage };
 
-      await Promise.race([
-        authModule.signInAnonymously(auth),
-        delay(5000)
-      ]);
-
-      // 重要：Firebase Auth 的 uid 跟我們的 currentUserId 不一定一樣
-      // - 沒 LIFF 登入：currentUserId 用 Firebase 匿名 uid（之前邏輯）
-      // - 有 LIFF 登入：currentUserId 用 line_xxx（跨裝置穩定）
-      // 兩者都會存在 note.authorUid，安全規則只需要驗證 authorUid 等於前端宣稱的 ID
-      if (!LIFF_ID || !lineProfile) {
-        currentUserId = auth.currentUser.uid;
-        localStorage.setItem("jzt_demo_uid", currentUserId);
-      }
+        await Promise.race([
+          authModule.signInAnonymously(auth),
+          delay(4000)
+        ]);
       } catch (err) {
         console.error("[Firebase] 初始化失敗，改用本機模式", err);
         hasFirebase = false;
@@ -1585,10 +1571,39 @@
       }
     }
 
+    // LIFF 與 Firebase 同時初始化，縮短進入前的等待
+    await Promise.all([initLiff(), initFirebase()]);
+
+    if (lineProfile) {
+      currentUserId = `line_${lineProfile.userId}`;
+    } else if (auth?.currentUser) {
+      currentUserId = auth.currentUser.uid;
+    }
+    localStorage.setItem("jzt_demo_uid", currentUserId);
+
+    function restoreLastLocation() {
+      try {
+        const saved = localStorage.getItem(`jzt_last_location_${currentUserId}`);
+        const savedCity = localStorage.getItem(`jzt_last_city_${currentUserId}`);
+        if (saved) {
+          currentLocation = JSON.parse(saved);
+          if (savedCity) currentCity = savedCity;
+        }
+      } catch {}
+    }
+
+    function saveLastLocation() {
+      try {
+        localStorage.setItem(`jzt_last_location_${currentUserId}`, JSON.stringify(currentLocation));
+        localStorage.setItem(`jzt_last_city_${currentUserId}`, currentCity);
+      } catch {}
+    }
+
     const taipei = { lat: 25.033, lng: 121.5654 };
     let currentLocation = { ...taipei };
     let currentCity = "台北";
-    let notes = loadDemoNotes();
+    restoreLastLocation();
+    let notes = [];
     let selectedNote = null;
     let selectedReplies = [];
     let currentFilter = "all";
@@ -1810,8 +1825,7 @@
 
     async function revealApp() {
       const bootStart = performance.now();
-      const hardCapMs = hasFirebase ? 10000 : 4500;
-      const hardCapTimer = setTimeout(() => finishBoot("hard-cap"), hardCapMs);
+      const hardCapTimer = setTimeout(() => finishBoot("hard-cap"), 6000);
 
       async function finishBoot(reason) {
         if (bootFinished) return;
@@ -1829,39 +1843,36 @@
 
         dismissSplash();
 
-        // 開場逾時強制進入時，背景再補載
-        if (reason === "hard-cap") {
-          if (hasFirebase) {
-            refreshNotes().catch((err) => console.warn("[背景] 紙條載入失敗", err));
-          }
-          locateMe().catch((err) => console.warn("[背景] 定位失敗", err));
+        syncPickedAuthorsFromFirebase().catch((err) => console.warn("[背景] 撿記錄同步失敗", err));
+        locateMe({ refreshAfter: false }).catch((err) => console.warn("[背景] 定位失敗", err));
+        if (reason === "hard-cap" && hasFirebase) {
+          refreshNotes({ background: true }).catch((err) => console.warn("[背景] 紙條載入失敗", err));
         }
       }
 
+      loadPickedAuthorsLocal();
+      const hadCache = hasFirebase && applyNotesCache();
+      if (hadCache) {
+        els.cityText.textContent = currentCity;
+      }
+
       try {
-        const uiReady = Promise.race([
+        await Promise.race([
           Promise.all([
-            Promise.race([document.fonts?.ready ?? Promise.resolve(), delay(1200)]),
-            Promise.race([preloadImage("paper_ball.png"), delay(1500)]).catch(() => {})
+            Promise.race([document.fonts?.ready ?? Promise.resolve(), delay(600)]),
+            Promise.race([preloadImage("paper_ball.png"), delay(800)]).catch(() => {}),
+            hasFirebase
+              ? Promise.race([
+                  refreshNotes({ background: hadCache }),
+                  delay(hadCache ? 2500 : 4000)
+                ])
+              : (async () => {
+                  await loadPickedAuthorsLocal();
+                  renderInitialNotes();
+                })()
           ]),
-          delay(2000)
+          delay(4500)
         ]);
-
-        const dataReady = hasFirebase
-          ? Promise.race([
-              Promise.all([
-                loadPickedAuthors(),
-                refreshNotes(),
-                Promise.race([locateMe(), delay(5000)])
-              ]),
-              delay(8000)
-            ])
-          : (async () => {
-              await loadPickedAuthors();
-              renderInitialNotes();
-            })();
-
-        await Promise.all([uiReady, dataReady]);
       } catch (err) {
         console.warn("[開場] 資源等待失敗", err);
       }
@@ -1875,7 +1886,7 @@
     }
 
     markersLayer = L.layerGroup().addTo(map);
-    userMarker = L.marker([taipei.lat, taipei.lng], {
+    userMarker = L.marker([currentLocation.lat, currentLocation.lng], {
       icon: L.divIcon({
         className: "",
         html: '<div class="user-marker"></div>',
@@ -1883,6 +1894,8 @@
         iconAnchor: [11, 11]
       })
     }).addTo(map);
+    map.setView([currentLocation.lat, currentLocation.lng], 15);
+    els.cityText.textContent = currentCity;
 
     revealApp();
 
@@ -2259,14 +2272,21 @@
       openSheet("nearby");
     }
 
-    function locateMe() {
+    function locateMe(options = {}) {
+      const { refreshAfter = true } = options;
       els.locateText.textContent = "定位中";
       els.locateButton.classList.add("locating");
 
       return new Promise((resolve) => {
         const finish = async () => {
           try {
-            await refreshNotes();
+            els.cityText.textContent = currentCity;
+            saveLastLocation();
+            if (refreshAfter) {
+              await refreshNotes();
+            } else {
+              renderNotes();
+            }
           } finally {
             els.locateText.textContent = "重新定位";
             els.locateButton.classList.remove("locating");
@@ -2300,19 +2320,23 @@
       });
     }
 
-    async function refreshNotes() {
+    async function refreshNotes(options = {}) {
+      const { background = false } = options;
       els.cityText.textContent = currentCity;
 
       try {
         if (hasFirebase) {
           notes = await loadFirebaseNotes();
+          saveNotesCache();
         } else {
           notes = loadDemoNotes();
         }
       } catch (error) {
         console.error(error);
-        showToast("Firebase 讀取失敗，先顯示測試紙條");
-        notes = loadDemoNotes();
+        if (!background && !notes.length) {
+          showToast("Firebase 讀取失敗，先顯示測試紙條");
+          notes = loadDemoNotes();
+        }
       }
 
       if (!hasFirebase && notes.length === 0) {
@@ -2580,6 +2604,49 @@
         }
       }
       return [];
+    }
+
+    function notesCacheKey() {
+      return `jzt_notes_cache_${currentUserId}`;
+    }
+
+    function notesForCache(sourceNotes) {
+      return sourceNotes.map((note) => ({
+        ...note,
+        imageUrl: note.imageUrl && note.imageUrl.length > 50000 ? "" : (note.imageUrl || "")
+      }));
+    }
+
+    function loadNotesCache() {
+      try {
+        const raw = localStorage.getItem(notesCacheKey());
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed?.notes?.length) return null;
+        if (Date.now() - (parsed.savedAt || 0) > 7 * 24 * 60 * 60 * 1000) return null;
+        return parsed.notes;
+      } catch {
+        return null;
+      }
+    }
+
+    function saveNotesCache() {
+      if (!hasFirebase || !notes.length) return;
+      try {
+        localStorage.setItem(notesCacheKey(), JSON.stringify({
+          savedAt: Date.now(),
+          notes: notesForCache(notes)
+        }));
+      } catch (err) {
+        console.warn("[快取] 紙條快取寫入失敗", err);
+      }
+    }
+
+    function applyNotesCache() {
+      const cached = loadNotesCache();
+      if (!cached) return false;
+      notes = cached;
+      return true;
     }
 
     function saveDemoNotes() {
@@ -2994,13 +3061,15 @@
       );
     }
 
-    async function loadPickedAuthors() {
+    function loadPickedAuthorsLocal() {
       pickedAuthorUids = new Set();
       try {
         JSON.parse(localStorage.getItem(pickedAuthorsStorageKey()) || "[]")
           .forEach((uid) => pickedAuthorUids.add(uid));
       } catch {}
+    }
 
+    async function syncPickedAuthorsFromFirebase() {
       if (!hasFirebase) return;
 
       try {
@@ -3013,6 +3082,11 @@
       } catch (err) {
         console.warn("[撿記錄] Firebase 讀取失敗，使用本機", err);
       }
+    }
+
+    async function loadPickedAuthors() {
+      loadPickedAuthorsLocal();
+      await syncPickedAuthorsFromFirebase();
     }
 
     function hasPickedAuthorBefore(authorUid) {
