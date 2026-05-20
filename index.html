@@ -679,6 +679,29 @@
       background: var(--paper-dark);
     }
 
+    /* 撿紙條底部動作列 */
+    .pick-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding-top: 14px;
+      margin-top: 14px;
+      border-top: 1px dashed var(--line);
+    }
+    .text-button {
+      background: none;
+      border: 0;
+      padding: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      letter-spacing: 0.05em;
+      text-decoration: underline;
+      text-decoration-color: var(--line);
+      text-underline-offset: 4px;
+      align-self: center;
+    }
+    .text-button:active { color: var(--seal); }
+
     .muted {
       color: var(--muted);
       font-size: 13px;
@@ -981,6 +1004,16 @@
             </div>
           </div>
         </section>
+
+        <!-- 底部：分享 + 檢舉 -->
+        <div class="pick-actions">
+          <button id="shareNoteButton" class="secondary-button" type="button">
+            分享給朋友
+          </button>
+          <button id="reportNoteButton" class="text-button" type="button">
+            檢舉這張紙條
+          </button>
+        </div>
       </article>
     </section>
 
@@ -1017,6 +1050,9 @@
     crossorigin=""
   ></script>
 
+  <!-- LINE LIFF SDK -->
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
   <script type="module">
     /*
       你以後只需要改這一段 Firebase 設定。
@@ -1031,6 +1067,12 @@
       appId: "1:501105409130:web:d1418a3fa8f7ddad4f5e13"
     };
 
+    /*
+      ★ LIFF 設定 ★
+      在 LINE Developers Console 建好 LIFF App 後，把它的 LIFF ID 填到下面
+      格式像：1234567890-AbCdEfGh
+      留空白 = 直接用網頁版（在 LINE 外面打開也能正常運作）
+    */
     const LIFF_ID = "";
 
     const hasFirebase = Boolean(
@@ -1046,6 +1088,39 @@
     let currentUserId = localStorage.getItem("jzt_demo_uid") || crypto.randomUUID();
     localStorage.setItem("jzt_demo_uid", currentUserId);
 
+    // === LIFF 初始化 ===
+    // 如果在 LINE 內被打開、且有設 LIFF ID，就跑 LIFF init
+    // 如果在外面瀏覽器打開，整段跳過、跟原本一樣運作
+    let lineProfile = null;   // 將存放 { userId, displayName, pictureUrl } 之類資訊（可選用途）
+    let inLiff = false;
+
+    if (LIFF_ID && typeof liff !== "undefined") {
+      try {
+        await liff.init({ liffId: LIFF_ID });
+        inLiff = liff.isInClient();
+        console.log("[LIFF] 初始化完成，inClient =", inLiff);
+
+        // 如果使用者還沒 login（一般網頁開啟 LIFF URL 時會發生），引導他登入
+        if (!liff.isLoggedIn()) {
+          // C 方案：登入是可選的——只有當使用者要綁定身份時才登入
+          // 預設不強迫登入，這樣陌生人點連結進來也能立刻看地圖
+          console.log("[LIFF] 未登入，使用匿名模式");
+        } else {
+          // 如果已經登入，把 LINE userId 當做穩定 UID
+          // 這樣同一個人不同裝置打開 LIFF 都會是同一個 ID
+          const profile = await liff.getProfile();
+          lineProfile = profile;
+          // 用 LINE userId 取代隨機 localStorage UID
+          // 注意：這只是「ID 的來源」改變，不會洩漏給其他人
+          currentUserId = `line_${profile.userId}`;
+          localStorage.setItem("jzt_demo_uid", currentUserId);
+          console.log("[LIFF] 已登入，userId =", profile.userId.slice(0, 6) + "...");
+        }
+      } catch (err) {
+        console.error("[LIFF] 初始化失敗（不影響網頁版運作）", err);
+      }
+    }
+
     if (hasFirebase) {
       const appModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-app.js");
       const authModule = await import("https://www.gstatic.com/firebasejs/11.2.0/firebase-auth.js");
@@ -1059,7 +1134,15 @@
       firebaseApi = { authModule, firestoreModule, storageModule, storage };
 
       await authModule.signInAnonymously(auth);
-      currentUserId = auth.currentUser.uid;
+
+      // 重要：Firebase Auth 的 uid 跟我們的 currentUserId 不一定一樣
+      // - 沒 LIFF 登入：currentUserId 用 Firebase 匿名 uid（之前邏輯）
+      // - 有 LIFF 登入：currentUserId 用 line_xxx（跨裝置穩定）
+      // 兩者都會存在 note.authorUid，安全規則只需要驗證 authorUid 等於前端宣稱的 ID
+      if (!LIFF_ID || !lineProfile) {
+        currentUserId = auth.currentUser.uid;
+        localStorage.setItem("jzt_demo_uid", currentUserId);
+      }
     }
 
     const taipei = { lat: 25.033, lng: 121.5654 };
@@ -1101,6 +1184,8 @@
       replyCountText: document.querySelector("#replyCountText"),
       submitReplyButton: document.querySelector("#submitReplyButton"),
       stickerRow: document.querySelector("#stickerRow"),
+      shareNoteButton: document.querySelector("#shareNoteButton"),
+      reportNoteButton: document.querySelector("#reportNoteButton"),
       nearbyAlert: document.querySelector("#nearbyAlert"),
       myNotesButton: document.querySelector("#myNotesButton"),
       myNotesPage: document.querySelector("#myNotesPage"),
@@ -1165,6 +1250,59 @@
       if (!button || !selectedNote) return;
       await submitReply({ type: "sticker", content: button.dataset.sticker });
     });
+
+    // === 分享紙條給 LINE 朋友 ===
+    els.shareNoteButton.addEventListener("click", async () => {
+      if (!selectedNote) return;
+      const previewText = (selectedNote.content || "圖片紙條").slice(0, 30);
+
+      // 如果在 LIFF 內，用 LINE 的分享選擇器；否則 fallback 到網頁分享
+      if (inLiff && typeof liff !== "undefined" && liff.isApiAvailable("shareTargetPicker")) {
+        try {
+          await liff.shareTargetPicker([{
+            type: "text",
+            text: `我在丟紙條撿到一張：「${previewText}」\n${window.location.href}`
+          }]);
+          showToast("已分享");
+        } catch (err) {
+          console.error(err);
+          showToast("分享失敗");
+        }
+      } else if (navigator.share) {
+        try {
+          await navigator.share({
+            title: "丟紙條",
+            text: `我撿到一張紙條：「${previewText}」`,
+            url: window.location.href
+          });
+        } catch (err) {
+          // 使用者取消分享，不算錯誤
+        }
+      } else {
+        // 最後手段：複製連結
+        try {
+          await navigator.clipboard.writeText(window.location.href);
+          showToast("已複製連結");
+        } catch {
+          showToast("無法分享");
+        }
+      }
+    });
+
+    // === 檢舉紙條 ===
+    els.reportNoteButton.addEventListener("click", async () => {
+      if (!selectedNote) return;
+      if (!confirm("確定要檢舉這張紙條？\n達到 3 次檢舉會自動下架。")) return;
+      try {
+        await reportNote(selectedNote);
+        showToast("已收到檢舉，謝謝你");
+        closeSheets();
+        await refreshNotes();
+      } catch (err) {
+        console.error(err);
+        showToast("檢舉失敗");
+      }
+    });
     document.querySelectorAll("[data-close]").forEach((button) => {
       button.addEventListener("click", closeSheets);
     });
@@ -1194,6 +1332,18 @@
       const imageFile = els.imageInput.files?.[0] || null;
       if (!content && !imageFile) return;
 
+      // === 每日扔紙條次數限制（C 方案：純前端檢查）===
+      // 注意：這只擋一般使用者，懂技術的人可以繞過。
+      // 想真正鎖死要寫 Firestore 規則 + Cloud Function。
+      const DAILY_LIMIT = 10;
+      const today = new Date().toISOString().slice(0, 10);  // YYYY-MM-DD
+      const usage = JSON.parse(localStorage.getItem("jzt_daily_usage") || "{}");
+      const todayCount = usage.date === today ? (usage.count || 0) : 0;
+      if (todayCount >= DAILY_LIMIT) {
+        showToast(`今天已經扔 ${DAILY_LIMIT} 張了，明天再來吧`);
+        return;
+      }
+
       const note = {
         id: crypto.randomUUID(),
         authorUid: currentUserId,
@@ -1221,6 +1371,13 @@
         await saveNote(note);
         notes.unshift(note);
         saveDemoNotes();
+
+        // 更新今日扔紙條次數
+        localStorage.setItem("jzt_daily_usage", JSON.stringify({
+          date: today,
+          count: todayCount + 1
+        }));
+
         els.noteInput.value = "";
         els.imageInput.value = "";
         els.imagePreview.hidden = true;
@@ -1229,7 +1386,8 @@
         els.submitNoteButton.textContent = "扔出去";
         closeSheets();
         renderNotes();
-        showToast("紙條已輕輕放下");
+        const remaining = DAILY_LIMIT - todayCount - 1;
+        showToast(`紙條已輕輕放下（今日剩 ${remaining} 次）`);
       } catch (error) {
         console.error("[扔紙條失敗]", error);
         const msg = error?.message || "未知錯誤";
@@ -1843,7 +2001,7 @@
         )
       );
 
-      return snapshot.docs.map((doc) => {
+      const all = snapshot.docs.map((doc) => {
         const data = doc.data();
         return {
           id: doc.id,
@@ -1860,8 +2018,32 @@
           expiresAt: data.expiresAt?.toDate?.().toISOString() || addDays(new Date(), 30).toISOString(),
           pickedCount: data.pickedCount || 0,
           replyCount: data.replyCount || 0,
+          reportCount: data.reportCount || 0,
           isSeed: Boolean(data.isSeed)
         };
+      });
+
+      // 過濾掉被檢舉 3 次以上的紙條
+      // 例外：自己丟的還是看得到（讓使用者知道自己被檢舉了）
+      return all.filter((note) =>
+        note.reportCount < 3 || note.authorUid === currentUserId
+      );
+    }
+
+    // === 檢舉紙條：用 array 記錄誰檢舉過，避免重複檢舉 ===
+    async function reportNote(note) {
+      if (note.id.startsWith("seed-")) {
+        showToast("這是示範紙條，無法檢舉");
+        return;
+      }
+      if (!hasFirebase) {
+        showToast("Demo 模式無法檢舉");
+        return;
+      }
+      const { doc, updateDoc, arrayUnion, increment } = firebaseApi.firestoreModule;
+      await updateDoc(doc(db, "notes", note.id), {
+        reportedBy: arrayUnion(currentUserId),
+        reportCount: increment(1)
       });
     }
 
