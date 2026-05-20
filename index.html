@@ -2243,7 +2243,7 @@
       }
     });
     document.querySelectorAll("[data-close]").forEach((button) => {
-      button.addEventListener("click", closeSheets);
+      button.addEventListener("click", () => closeSheets());
     });
 
     els.noteInput.addEventListener("input", () => {
@@ -2440,13 +2440,21 @@
 
     let myNotesLoadToken = 0;
 
+    function syncSheetOpenClass() {
+      document.body.classList.toggle(
+        "sheet-open",
+        Boolean(document.querySelector(".sheet.open"))
+      );
+    }
+
     function closeSheets(except) {
-      if (except !== "throw") els.throwSheet.classList.remove("open");
-      if (except !== "pick") els.pickSheet.classList.remove("open");
-      if (except !== "city") els.citySheet.classList.remove("open");
-      if (except !== "nearby") els.nearbySheet.classList.remove("open");
-      if (except !== "myNotes") els.myNotesPage.classList.remove("open");
-      if (!except) document.body.classList.remove("sheet-open");
+      const keep = typeof except === "string" ? except : null;
+      if (keep !== "throw") els.throwSheet.classList.remove("open");
+      if (keep !== "pick") els.pickSheet.classList.remove("open");
+      if (keep !== "city") els.citySheet.classList.remove("open");
+      if (keep !== "nearby") els.nearbySheet.classList.remove("open");
+      if (keep !== "myNotes") els.myNotesPage.classList.remove("open");
+      syncSheetOpenClass();
     }
 
     function openSheet(name) {
@@ -2456,7 +2464,7 @@
       if (name === "city") els.citySheet.classList.add("open");
       if (name === "nearby") els.nearbySheet.classList.add("open");
       if (name === "myNotes") els.myNotesPage.classList.add("open");
-      document.body.classList.add("sheet-open");
+      syncSheetOpenClass();
     }
 
     /*
