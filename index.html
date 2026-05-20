@@ -360,7 +360,7 @@
     /* ========== 底部三欄 ========== */
     .bottom-bar {
       position: absolute;
-      z-index: 500;
+      z-index: 850;
       left: 0;
       right: 0;
       bottom: 0;
@@ -1104,6 +1104,64 @@
     }
     .alert.show { display: block; }
 
+    .alert.reply-alert {
+      z-index: 860;
+      pointer-events: auto;
+      left: auto;
+      right: 16px;
+      bottom: 168px;
+      transform: rotate(2deg);
+      background: var(--mustard);
+      color: var(--ink);
+      max-width: calc(100% - 32px);
+    }
+    .alert.reply-alert.show {
+      display: block;
+    }
+    @keyframes replyAlertBounce {
+      0%, 100% { transform: translateY(0) rotate(2deg); }
+      50%      { transform: translateY(-6px) rotate(2deg); }
+    }
+    .alert.reply-alert.show {
+      animation: replyAlertBounce 1.4s ease-in-out infinite;
+    }
+
+    .bottom-tab {
+      position: relative;
+    }
+    .bottom-tab .tab-badge {
+      position: absolute;
+      top: 2px;
+      right: 8px;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 999px;
+      background: var(--tomato);
+      color: var(--paper);
+      font-size: 11px;
+      font-weight: 900;
+      line-height: 18px;
+      text-align: center;
+      border: 2px solid var(--paper);
+      display: none;
+    }
+    .bottom-tab .tab-badge.show { display: block; }
+
+    .image-preview-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .image-preview-row .image-preview {
+      width: 88px;
+      height: 88px;
+      object-fit: cover;
+      border-radius: 12px;
+      border: 2px solid var(--ink);
+    }
+
     @keyframes alertBounce {
       0%, 100% { transform: translateX(-50%) translateY(0) rotate(-2deg); }
       50%      { transform: translateX(-50%) translateY(-6px) rotate(-2deg); }
@@ -1311,10 +1369,11 @@
       <!-- ★ 中央大紙團「扔」按鈕 ★ -->
       <button id="openThrowButton" class="throw-paper-ball" type="button" title="丟紙條" aria-label="丟紙條">
         <img src="paper_ball.png" alt="" aria-hidden="true" />
-        <span id="throwRemainingText" class="throw-ball-remaining">今日剩 10 次</span>
+        <span id="throwRemainingText" class="throw-ball-remaining">今日剩 5 次</span>
       </button>
 
       <button id="myNotesButton" class="bottom-tab right" type="button">
+        <span id="myNotesBadge" class="tab-badge" aria-hidden="true">0</span>
         <svg class="icon" viewBox="0 0 24 24">
           <path d="M20 6H4a2 2 0 00-2 2v9a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2z"/>
           <path d="M2 9l10 5 10-5"/>
@@ -1325,6 +1384,7 @@
 
     <!-- 附近紙條提示 -->
     <button id="nearbyAlert" class="alert" type="button">附近有 0 張紙條，點我撿起</button>
+    <button id="replyAlert" class="alert reply-alert" type="button" hidden>有人回覆你的紙條</button>
     <div id="toast" class="toast"></div>
 
     <!-- 丟紙條抽屜 -->
@@ -1336,9 +1396,9 @@
       <form id="throwForm" class="throw-form">
         <textarea id="noteInput" maxlength="140" rows="5" placeholder="把想留下的話，輕輕寫在這張信紙上⋯"></textarea>
         <div class="image-input-row">
-          <input id="imageInput" type="file" accept="image/*" />
-          <img id="imagePreview" class="image-preview" alt="圖片預覽" hidden />
-          <span class="muted">可只寫文字，也可選一張圖片一起丟出去</span>
+          <input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp,image/*" multiple />
+          <div id="imagePreviewRow" class="image-preview-row" hidden></div>
+          <span id="imageCountText" class="muted">每張紙條最多 2 張 · 今日圖片剩 2 張</span>
         </div>
         <div class="sheet-row">
           <span id="countText" class="muted">140 字</span>
@@ -1447,7 +1507,7 @@
     <!-- 我的紙條抽屜（可下滑關閉） -->
     <section id="myNotesPage" class="sheet sheet-tall" aria-label="我的紙條">
       <header class="sheet-header">
-        <h2>我的紙條</h2>
+        <h2 id="myNotesTitle">我的紙條</h2>
         <button class="close-button" type="button" data-close>×</button>
       </header>
       <p id="myNickname" class="my-nickname">—</p>
@@ -1485,7 +1545,9 @@
       留空白 = 直接用網頁版（在 LINE 外面打開也能正常運作）
     */
     const LIFF_ID = "2010143431-l2kcIl8v";
-    const DAILY_LIMIT = 10;
+    const DAILY_LIMIT = 5;
+    const DAILY_IMAGE_LIMIT = 2;
+    const MAX_IMAGES_PER_NOTE = 2;
     const MIN_SPLASH_MS = 600;
 
     function delay(ms) {
@@ -1612,6 +1674,8 @@
     let userMarker = null;
     let pickedNoteIds = new Set();
 
+    let selectedThrowImages = [];
+
     const els = {
       cityButton: document.querySelector("#cityButton"),
       cityText: document.querySelector("#cityText"),
@@ -1629,7 +1693,8 @@
       citySheet: document.querySelector("#citySheet"),
       noteInput: document.querySelector("#noteInput"),
       imageInput: document.querySelector("#imageInput"),
-      imagePreview: document.querySelector("#imagePreview"),
+      imagePreviewRow: document.querySelector("#imagePreviewRow"),
+      imageCountText: document.querySelector("#imageCountText"),
       countText: document.querySelector("#countText"),
       submitNoteButton: document.querySelector("#submitNoteButton"),
       throwForm: document.querySelector("#throwForm"),
@@ -1648,6 +1713,9 @@
       shareNoteButton: document.querySelector("#shareNoteButton"),
       reportNoteButton: document.querySelector("#reportNoteButton"),
       nearbyAlert: document.querySelector("#nearbyAlert"),
+      replyAlert: document.querySelector("#replyAlert"),
+      myNotesBadge: document.querySelector("#myNotesBadge"),
+      myNotesTitle: document.querySelector("#myNotesTitle"),
       myNotesButton: document.querySelector("#myNotesButton"),
       myNotesPage: document.querySelector("#myNotesPage"),
       myNotesList: document.querySelector("#myNotesList"),
@@ -1792,23 +1860,96 @@
       });
     }
 
-    function getTodayThrowCount() {
+    function getDailyUsage() {
       const today = new Date().toISOString().slice(0, 10);
-      const usage = JSON.parse(localStorage.getItem("jzt_daily_usage") || "{}");
-      return usage.date === today ? (usage.count || 0) : 0;
+      const raw = JSON.parse(localStorage.getItem(`jzt_daily_usage_${currentUserId}`) || "{}");
+      if (raw.date !== today) {
+        return { date: today, throwCount: 0, imageCount: 0 };
+      }
+      return {
+        date: today,
+        throwCount: raw.throwCount ?? raw.count ?? 0,
+        imageCount: raw.imageCount ?? 0
+      };
+    }
+
+    function saveDailyUsage(usage) {
+      localStorage.setItem(`jzt_daily_usage_${currentUserId}`, JSON.stringify(usage));
+    }
+
+    function getTodayThrowCount() {
+      return getDailyUsage().throwCount;
+    }
+
+    function getTodayImageCount() {
+      return getDailyUsage().imageCount;
+    }
+
+    function getNoteImageUrls(note) {
+      if (Array.isArray(note.imageUrls) && note.imageUrls.length) {
+        return note.imageUrls.filter(Boolean);
+      }
+      if (note.imageUrl) return [note.imageUrl];
+      return [];
+    }
+
+    function noteHasImage(note) {
+      return getNoteImageUrls(note).length > 0;
+    }
+
+    function getSeenReplyCounts() {
+      try {
+        return JSON.parse(localStorage.getItem(`jzt_seen_replies_${currentUserId}`) || "{}");
+      } catch {
+        return {};
+      }
+    }
+
+    function markNoteRepliesSeen(noteId, count) {
+      const seen = getSeenReplyCounts();
+      seen[noteId] = count;
+      localStorage.setItem(`jzt_seen_replies_${currentUserId}`, JSON.stringify(seen));
+    }
+
+    function countNewReplies() {
+      const seen = getSeenReplyCounts();
+      return notes
+        .filter((note) => note.authorUid === currentUserId && !note.isSeed)
+        .reduce((sum, note) => {
+          const current = note.replyCount || 0;
+          const known = seen[note.id] || 0;
+          return sum + Math.max(0, current - known);
+        }, 0);
+    }
+
+    function updateReplyAlert() {
+      const newCount = countNewReplies();
+      if (newCount > 0) {
+        els.replyAlert.hidden = false;
+        els.replyAlert.classList.add("show");
+        els.replyAlert.textContent = `有 ${newCount} 則新回覆，點我查看`;
+        els.myNotesBadge.textContent = String(newCount);
+        els.myNotesBadge.classList.add("show");
+      } else {
+        els.replyAlert.classList.remove("show");
+        els.replyAlert.hidden = true;
+        els.myNotesBadge.classList.remove("show");
+      }
     }
 
     function updateThrowRemainingLabel() {
-      const remaining = Math.max(0, DAILY_LIMIT - getTodayThrowCount());
-      if (els.throwRemainingText) {
-        els.throwRemainingText.textContent = `今日剩 ${remaining} 次`;
+      const usage = getDailyUsage();
+      const throwRemaining = Math.max(0, DAILY_LIMIT - usage.throwCount);
+      const imageRemaining = Math.max(0, DAILY_IMAGE_LIMIT - usage.imageCount);
+      els.throwRemainingText.textContent = `今日剩 ${throwRemaining} 次`;
+      if (els.imageCountText) {
+        els.imageCountText.textContent =
+          `每張最多 ${MAX_IMAGES_PER_NOTE} 張 · 今日圖片剩 ${imageRemaining} 張`;
       }
-      if (els.openThrowButton) {
-        els.openThrowButton.setAttribute(
-          "aria-label",
-          remaining > 0 ? `丟紙條，今日剩 ${remaining} 次` : "今日次數已用完"
-        );
-      }
+      els.openThrowButton.setAttribute(
+        "aria-label",
+        throwRemaining > 0 ? `丟紙條，今日剩 ${throwRemaining} 次` : "今日次數已用完"
+      );
     }
 
     function renderInitialNotes() {
@@ -1836,6 +1977,7 @@
         try {
           updateThrowRemainingLabel();
           if (markersLayer) renderNotes();
+          updateReplyAlert();
           map.invalidateSize();
         } catch (err) {
           console.warn("[開場] 初始畫面失敗", err);
@@ -1915,7 +2057,8 @@
       showToast("已重新整理");
     });
     els.openThrowButton.addEventListener("click", () => openSheet("throw"));
-    els.myNotesButton.addEventListener("click", showMyNotes);
+    els.myNotesButton.addEventListener("click", () => showMyNotes({ repliesOnly: false }));
+    els.replyAlert.addEventListener("click", () => showMyNotes({ repliesOnly: true }));
     els.nearbyListButton.addEventListener("click", showNearbyList);
     els.nearbyAlert.addEventListener("click", pickNearestNote);
     els.replyInput.addEventListener("input", () => {
@@ -2013,41 +2156,84 @@
       updateThrowButton();
     });
 
+    function renderImagePreviews() {
+      els.imagePreviewRow.innerHTML = "";
+      if (!selectedThrowImages.length) {
+        els.imagePreviewRow.hidden = true;
+        return;
+      }
+      els.imagePreviewRow.hidden = false;
+      selectedThrowImages.forEach((file, index) => {
+        const img = document.createElement("img");
+        img.className = "image-preview";
+        img.src = URL.createObjectURL(file);
+        img.alt = `預覽 ${index + 1}`;
+        els.imagePreviewRow.appendChild(img);
+      });
+    }
+
+    function clearThrowImages() {
+      selectedThrowImages = [];
+      els.imageInput.value = "";
+      renderImagePreviews();
+    }
+
     els.imageInput.addEventListener("change", () => {
-      const file = els.imageInput.files?.[0];
-      if (!file) {
-        els.imagePreview.hidden = true;
-        els.imagePreview.removeAttribute("src");
+      const files = [...(els.imageInput.files || [])];
+      if (!files.length) {
+        clearThrowImages();
+        updateThrowButton();
+        updateThrowRemainingLabel();
+        return;
+      }
+
+      const usage = getDailyUsage();
+      const imageRemaining = DAILY_IMAGE_LIMIT - usage.imageCount;
+      const allowed = Math.min(MAX_IMAGES_PER_NOTE, Math.max(0, imageRemaining));
+
+      if (allowed <= 0) {
+        showToast(`今天圖片額度已用完（${DAILY_IMAGE_LIMIT} 張）`);
+        clearThrowImages();
         updateThrowButton();
         return;
       }
-      els.imagePreview.src = URL.createObjectURL(file);
-      els.imagePreview.hidden = false;
+
+      if (files.length > allowed) {
+        showToast(`最多選 ${allowed} 張（每張紙條 ${MAX_IMAGES_PER_NOTE} 張 · 今日剩 ${imageRemaining} 張）`);
+      }
+
+      selectedThrowImages = files.slice(0, allowed);
+      renderImagePreviews();
       updateThrowButton();
+      updateThrowRemainingLabel();
     });
 
     els.throwForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const content = els.noteInput.value.trim().slice(0, 140);
-      const imageFile = els.imageInput.files?.[0] || null;
-      if (!content && !imageFile) return;
+      const imageFiles = [...selectedThrowImages];
+      if (!content && !imageFiles.length) return;
 
-      // === 每日扔紙條次數限制（C 方案：純前端檢查）===
-      // 注意：這只擋一般使用者，懂技術的人可以繞過。
-      // 想真正鎖死要寫 Firestore 規則 + Cloud Function。
-      const today = new Date().toISOString().slice(0, 10);  // YYYY-MM-DD
-      const todayCount = getTodayThrowCount();
-      if (todayCount >= DAILY_LIMIT) {
+      const today = new Date().toISOString().slice(0, 10);
+      const usage = getDailyUsage();
+      if (usage.throwCount >= DAILY_LIMIT) {
         showToast(`今天已經扔 ${DAILY_LIMIT} 張了，明天再來吧`);
+        return;
+      }
+
+      const imageRemaining = DAILY_IMAGE_LIMIT - usage.imageCount;
+      if (imageFiles.length > imageRemaining) {
+        showToast(`今天圖片只剩 ${imageRemaining} 張額度`);
         return;
       }
 
       const note = {
         id: crypto.randomUUID(),
         authorUid: currentUserId,
-        type: imageFile ? "image" : "text",
+        type: imageFiles.length ? "image" : "text",
         content,
         imageUrl: "",
+        imageUrls: [],
         location: { ...currentLocation },
         city: currentCity,
         createdAt: new Date().toISOString(),
@@ -2059,14 +2245,19 @@
 
       try {
         els.submitNoteButton.disabled = true;
-        els.submitNoteButton.textContent = "壓縮圖片…";
 
-        if (imageFile) {
-          note.imageUrl = await withTimeout(
-            uploadNoteImage(imageFile),
-            20000,
-            "圖片處理逾時，請換小一點的圖或改用 JPG"
-          );
+        if (imageFiles.length) {
+          els.submitNoteButton.textContent = "上傳圖片…";
+          note.imageUrls = [];
+          for (const file of imageFiles) {
+            const url = await withTimeout(
+              uploadNoteImage(file),
+              25000,
+              "圖片處理逾時，請換小一點的圖或改用 JPG"
+            );
+            note.imageUrls.push(url);
+          }
+          note.imageUrl = note.imageUrls[0] || "";
           if (!note.content) note.content = "圖片紙條";
         }
 
@@ -2080,21 +2271,21 @@
         notes.unshift(note);
         if (!hasFirebase) saveDemoNotes();
 
-        localStorage.setItem("jzt_daily_usage", JSON.stringify({
+        saveDailyUsage({
           date: today,
-          count: todayCount + 1
-        }));
+          throwCount: usage.throwCount + 1,
+          imageCount: usage.imageCount + imageFiles.length
+        });
         updateThrowRemainingLabel();
 
         els.noteInput.value = "";
-        els.imageInput.value = "";
-        els.imagePreview.hidden = true;
-        els.imagePreview.removeAttribute("src");
+        clearThrowImages();
         els.countText.textContent = "140 字";
         closeSheets();
         renderNotes();
-        const remaining = DAILY_LIMIT - todayCount - 1;
-        showToast(`紙條已輕輕放下（今日剩 ${remaining} 次）`);
+        updateReplyAlert();
+        const throwRemaining = DAILY_LIMIT - usage.throwCount - 1;
+        showToast(`紙條已輕輕放下（今日剩 ${throwRemaining} 次）`);
       } catch (error) {
         console.error("[扔紙條失敗]", error);
         const msg = error?.message || "未知錯誤";
@@ -2135,8 +2326,25 @@
 
     function updateThrowButton() {
       const hasText = els.noteInput.value.trim().length > 0;
-      const hasImage = Boolean(els.imageInput.files?.[0]);
+      const hasImage = selectedThrowImages.length > 0;
       els.submitNoteButton.disabled = !hasText && !hasImage;
+    }
+
+    function appendNoteImages(container, note) {
+      getNoteImageUrls(note).forEach((url) => {
+        const img = document.createElement("img");
+        img.className = "picked-image";
+        img.src = url;
+        img.alt = note.content || "圖片紙條";
+        img.loading = "lazy";
+        img.addEventListener("error", () => {
+          img.replaceWith(Object.assign(document.createElement("p"), {
+            className: "muted",
+            textContent: "圖片載入失敗"
+          }));
+        });
+        container.appendChild(img);
+      });
     }
 
     function openSheet(name) {
@@ -2242,13 +2450,8 @@
           card.className = "note-card";
           card.style.cursor = "pointer";
 
-          if (note.imageUrl) {
-            const img = document.createElement("img");
-            img.className = "picked-image";
-            img.src = note.imageUrl;
-            img.alt = "";
-            img.style.maxHeight = "140px";
-            card.appendChild(img);
+          if (noteHasImage(note)) {
+            appendNoteImages(card, note);
           }
 
           const p = document.createElement("p");
@@ -2344,6 +2547,7 @@
       }
 
       renderNotes();
+      updateReplyAlert();
     }
 
     function renderNotes() {
@@ -2355,7 +2559,7 @@
       visibleNotes.forEach((note) => {
         const isMine = note.authorUid === currentUserId;
         const isFollowed = isFollowing(note.authorUid);
-        const hasImage = note.imageUrl && note.type === "image";
+        const hasImage = noteHasImage(note);
 
         // 決定 marker class
         let extraClass = "";
@@ -2366,9 +2570,8 @@
         let markerHtml;
         let iconSize;
         if (hasImage) {
-          // 圖片紙條：顯示縮圖
-          const escapedUrl = note.imageUrl.replaceAll('"', '&quot;');
-          markerHtml = `<div class="paper-marker image-marker ${extraClass}"><img src="${escapedUrl}" alt="" /></div>`;
+          const thumbUrl = getNoteImageUrls(note)[0].replaceAll('"', "&quot;");
+          markerHtml = `<div class="paper-marker image-marker ${extraClass}"><img src="${thumbUrl}" alt="" loading="lazy" /></div>`;
           iconSize = 44;
         } else {
           // 文字紙條：用 emoji 顯示
@@ -2457,13 +2660,7 @@
 
     function renderPickedNote(note) {
       els.pickedContent.innerHTML = "";
-      if (note.imageUrl) {
-        const img = document.createElement("img");
-        img.className = "picked-image";
-        img.src = note.imageUrl;
-        img.alt = note.content || "圖片紙條";
-        els.pickedContent.appendChild(img);
-      }
+      appendNoteImages(els.pickedContent, note);
       const text = document.createElement("span");
       text.textContent = note.content || "圖片紙條";
       els.pickedContent.appendChild(text);
@@ -2513,85 +2710,106 @@
       });
     }
 
-    async function showMyNotes() {
-      // 顯示自己的綽號
+    async function showMyNotes(options = {}) {
+      const { repliesOnly = false } = options;
+      closeSheets();
+
+      els.myNotesTitle.textContent = repliesOnly ? "有回覆的紙條" : "我的紙條";
       els.myNickname.textContent = `你是「${nicknameOf(currentUserId)}」`;
 
-      const mine = notes.filter((note) => note.authorUid === currentUserId);
+      let mine = notes.filter((note) => note.authorUid === currentUserId);
       els.myNotesList.innerHTML = "";
 
-      if (mine.length === 0) {
+      if (repliesOnly) {
+        const withReplies = [];
+        for (const note of mine) {
+          const replies = await loadReplies(note);
+          if (replies.length > 0) withReplies.push({ note, replies });
+        }
+        mine = withReplies.map((item) => item.note);
+
+        if (!withReplies.length) {
+          els.myNotesList.innerHTML = '<p class="muted">目前還沒有人回覆你的紙條。</p>';
+          openSheet("myNotes");
+          return;
+        }
+
+        for (const { note, replies } of withReplies) {
+          markNoteRepliesSeen(note.id, note.replyCount || replies.length);
+          renderMyNoteCard(note, replies);
+        }
+      } else if (mine.length === 0) {
         els.myNotesList.innerHTML = '<p class="muted">目前還沒有丟出的紙條。</p>';
       } else {
         for (const note of mine) {
           const replies = await loadReplies(note);
-          const card = document.createElement("article");
-          card.className = "note-card";
-          const body = document.createElement("div");
-          if (note.imageUrl) {
-            const img = document.createElement("img");
-            img.className = "picked-image";
-            img.src = note.imageUrl;
-            img.alt = note.content || "圖片紙條";
-            body.appendChild(img);
-          }
-          const p = document.createElement("p");
-          p.textContent = note.content || "圖片紙條";
-          body.appendChild(p);
-          const meta = document.createElement("span");
-          meta.className = "muted";
-          meta.textContent = `${note.city} · 被撿起 ${note.pickedCount} 次 · 回覆 ${replies.length} 則`;
-          body.appendChild(meta);
-
-          const replyBox = document.createElement("div");
-          replyBox.className = "reply-list";
-          replyBox.style.marginTop = "12px";
-          if (!replies.length) {
-            replyBox.innerHTML = '<p class="muted">還沒有回覆。</p>';
-          } else {
-            replies.forEach((reply) => {
-              const replyCard = document.createElement("article");
-              replyCard.className = "reply-card";
-              const replyText = document.createElement("p");
-              replyText.textContent = reply.content;
-              const replyTime = document.createElement("small");
-              replyTime.textContent = new Date(reply.createdAt).toLocaleString("zh-TW");
-              replyCard.append(replyText, replyTime);
-              replyBox.appendChild(replyCard);
-            });
-          }
-
-          const actions = document.createElement("div");
-          actions.className = "note-card-actions";
-          const openButton = document.createElement("button");
-          openButton.className = "secondary-button";
-          openButton.type = "button";
-          openButton.textContent = "打開紙條";
-          openButton.addEventListener("click", () => {
-            els.myNotesPage.classList.remove("open");
-            pickNote(note);
-          });
-          const deleteButton = document.createElement("button");
-          deleteButton.className = "danger-button";
-          deleteButton.type = "button";
-          deleteButton.textContent = "撿回刪除";
-          deleteButton.addEventListener("click", async () => {
-            const ok = await customConfirm("確定要撿回並刪除這張紙條嗎？", {
-              confirmText: "刪除", danger: true
-            });
-            if (!ok) return;
-            await deleteMyNote(note);
-            showToast("紙條已刪除");
-            await refreshNotes();
-            showMyNotes();
-          });
-          actions.append(openButton, deleteButton);
-          card.append(body, replyBox, actions);
-          els.myNotesList.appendChild(card);
+          markNoteRepliesSeen(note.id, note.replyCount || replies.length);
+          renderMyNoteCard(note, replies);
         }
       }
 
-      els.myNotesPage.classList.add("open");
+      updateReplyAlert();
+      openSheet("myNotes");
+    }
+
+    function renderMyNoteCard(note, replies) {
+      const card = document.createElement("article");
+      card.className = "note-card";
+      const body = document.createElement("div");
+      appendNoteImages(body, note);
+      const p = document.createElement("p");
+      p.textContent = note.content || "圖片紙條";
+      body.appendChild(p);
+      const meta = document.createElement("span");
+      meta.className = "muted";
+      meta.textContent = `${note.city} · 被撿起 ${note.pickedCount} 次 · 回覆 ${replies.length} 則`;
+      body.appendChild(meta);
+
+      const replyBox = document.createElement("div");
+      replyBox.className = "reply-list";
+      replyBox.style.marginTop = "12px";
+      if (!replies.length) {
+        replyBox.innerHTML = '<p class="muted">還沒有回覆。</p>';
+      } else {
+        replies.forEach((reply) => {
+          const replyCard = document.createElement("article");
+          replyCard.className = "reply-card";
+          const replyText = document.createElement("p");
+          replyText.textContent = reply.content;
+          const replyTime = document.createElement("small");
+          replyTime.textContent = new Date(reply.createdAt).toLocaleString("zh-TW");
+          replyCard.append(replyText, replyTime);
+          replyBox.appendChild(replyCard);
+        });
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "note-card-actions";
+      const openButton = document.createElement("button");
+      openButton.className = "secondary-button";
+      openButton.type = "button";
+      openButton.textContent = "打開紙條";
+      openButton.addEventListener("click", () => {
+        closeSheets();
+        pickNote(note);
+      });
+      const deleteButton = document.createElement("button");
+      deleteButton.className = "danger-button";
+      deleteButton.type = "button";
+      deleteButton.textContent = "撿回刪除";
+      deleteButton.addEventListener("click", async () => {
+        const ok = await customConfirm("確定要撿回並刪除這張紙條嗎？", {
+          confirmText: "刪除", danger: true
+        });
+        if (!ok) return;
+        await deleteMyNote(note);
+        showToast("紙條已刪除");
+        await refreshNotes();
+        showMyNotes({ repliesOnly: false });
+      });
+      actions.append(openButton, deleteButton);
+      card.append(body, replyBox, actions);
+      els.myNotesList.appendChild(card);
     }
 
     function loadDemoNotes() {
@@ -2610,11 +2828,21 @@
       return `jzt_notes_cache_${currentUserId}`;
     }
 
+    function stripLargeDataUrl(url) {
+      if (!url) return "";
+      if (url.startsWith("http")) return url;
+      return url.length > 50000 ? "" : url;
+    }
+
     function notesForCache(sourceNotes) {
-      return sourceNotes.map((note) => ({
-        ...note,
-        imageUrl: note.imageUrl && note.imageUrl.length > 50000 ? "" : (note.imageUrl || "")
-      }));
+      return sourceNotes.map((note) => {
+        const imageUrls = getNoteImageUrls(note).map(stripLargeDataUrl).filter(Boolean);
+        return {
+          ...note,
+          imageUrl: imageUrls[0] || "",
+          imageUrls
+        };
+      });
     }
 
     function loadNotesCache() {
@@ -2715,7 +2943,8 @@
         authorUid: currentUserId,
         type: note.type,
         content: note.content,
-        imageUrl: note.imageUrl || "",
+        imageUrl: note.imageUrl || getNoteImageUrls(note)[0] || "",
+        imageUrls: getNoteImageUrls(note),
         location: new GeoPoint(note.location.lat, note.location.lng),
         city: note.city,
         geohash: `${note.location.lat.toFixed(3)},${note.location.lng.toFixed(3)}`,
@@ -2730,12 +2959,7 @@
     }
 
     /**
-     * 把圖片檔案壓縮並轉成 base64 data URL
-     * 為什麼這樣做：直接存 base64 到 Firestore，繞過 Storage 規則設定
-     * Firestore 單一文件上限 1MB，所以一定要壓縮
-     *   - 縮到最長邊 1024px
-     *   - JPEG 品質 0.75
-     *   - 一般手機照片壓完約 80-200KB
+     * 優先 Firebase Storage（https 網址）；失敗時 demo 模式改 B64
      */
     async function uploadNoteImage(file) {
       const unsupported = /heic|heif/i.test(file.type || file.name || "");
@@ -2747,10 +2971,33 @@
       const sizeKb = Math.round(dataUrl.length * 0.75 / 1024);
       console.log(`[圖片] 壓縮後約 ${sizeKb} KB`);
 
+      if (hasFirebase && firebaseApi?.storage) {
+        try {
+          const url = await uploadImageToStorage(dataUrl);
+          console.log("[圖片] Storage 上傳成功");
+          return url;
+        } catch (err) {
+          console.warn("[圖片] Storage 上傳失敗，改用 B64", err);
+        }
+      }
+
       if (dataUrl.length > 700 * 1024) {
         throw new Error(`圖片壓縮後仍太大（${sizeKb} KB），請換一張較小的圖`);
       }
       return dataUrl;
+    }
+
+    async function uploadImageToStorage(dataUrl) {
+      const { storageModule, storage } = firebaseApi;
+      const { ref, uploadString, getDownloadURL } = storageModule;
+      const path = `notes/${currentUserId}/${Date.now()}_${crypto.randomUUID()}.jpg`;
+      const storageRef = ref(storage, path);
+      await withTimeout(
+        uploadString(storageRef, dataUrl, "data_url", { contentType: "image/jpeg" }),
+        25000,
+        "圖片上傳逾時，請檢查網路"
+      );
+      return await getDownloadURL(storageRef);
     }
 
     async function compressImageToDataUrl(file, maxSide = 800, quality = 0.68) {
@@ -2940,12 +3187,16 @@
 
       const all = snapshot.docs.map((doc) => {
         const data = doc.data();
+        const imageUrls = Array.isArray(data.imageUrls) && data.imageUrls.length
+          ? data.imageUrls.filter(Boolean)
+          : (data.imageUrl ? [data.imageUrl] : []);
         return {
           id: doc.id,
           authorUid: data.authorUid,
           type: data.type,
           content: data.content,
-          imageUrl: data.imageUrl || "",
+          imageUrl: imageUrls[0] || "",
+          imageUrls,
           location: {
             lat: data.location.latitude,
             lng: data.location.longitude
