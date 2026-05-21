@@ -966,6 +966,41 @@
       box-shadow: 0 0 0 var(--ink);
     }
 
+    .nickname-panel {
+      display: grid;
+      gap: 10px;
+      margin: 14px 4px 0;
+      padding: 14px;
+      border: 2.5px dashed var(--ink);
+      border-radius: 12px 16px 11px 14px;
+      background: var(--paper);
+    }
+    .nickname-form {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+    }
+    .nickname-form input {
+      min-height: 44px;
+      padding: 10px 12px;
+      border: 2.5px solid var(--ink);
+      border-radius: 10px 14px 11px 12px;
+      background: var(--paper-light);
+      font-family: inherit;
+      font-size: 15px;
+      color: var(--ink);
+    }
+    .nickname-form-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .nickname-hint {
+      margin: 0;
+      font-size: 13px;
+    }
+
     .note-content {
       margin: 0;
       padding: 24px;
@@ -1702,7 +1737,16 @@
       </header>
       <div class="my-nickname-row">
         <p id="myNickname" class="my-nickname">—</p>
-        <button id="rollNicknameButton" class="nickname-roll-button" type="button">換暱稱</button>
+      </div>
+      <div class="nickname-panel">
+        <form id="nicknameForm" class="nickname-form">
+          <input id="nicknameInput" type="text" maxlength="24" placeholder="自訂暱稱（最多 24 字）" autocomplete="nickname" />
+          <button id="saveNicknameButton" class="primary-button" type="submit">設定</button>
+        </form>
+        <div class="nickname-form-actions">
+          <button id="rollNicknameButton" class="nickname-roll-button" type="button">隨機換暱稱</button>
+        </div>
+        <p class="muted nickname-hint">新暱稱只會套用在之後丟出的紙條。</p>
       </div>
       <div id="myNotesList" class="note-list"></div>
     </section>
@@ -2001,6 +2045,9 @@
       myNotesPage: document.querySelector("#myNotesPage"),
       myNotesList: document.querySelector("#myNotesList"),
       myNickname: document.querySelector("#myNickname"),
+      nicknameForm: document.querySelector("#nicknameForm"),
+      nicknameInput: document.querySelector("#nicknameInput"),
+      saveNicknameButton: document.querySelector("#saveNicknameButton"),
       rollNicknameButton: document.querySelector("#rollNicknameButton"),
       cityForm: document.querySelector("#cityForm"),
       cityInput: document.querySelector("#cityInput"),
@@ -2609,6 +2656,10 @@
     });
     els.openThrowButton.addEventListener("click", () => openSheet("throw"));
     els.myNotesButton.addEventListener("click", () => showMyNotes({ repliesOnly: false }));
+    els.nicknameForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveCustomNickname();
+    });
     els.rollNicknameButton.addEventListener("click", () => rollMyNickname());
     els.replyAlert.addEventListener("click", () => showMyNotes({ repliesOnly: true }));
     els.openRepliesButton.addEventListener("click", () => openRepliesSheet());
@@ -4305,20 +4356,37 @@
     }
 
     function updateMyNicknameUI() {
+      const name = getMyNickname();
       if (els.myNickname) {
-        els.myNickname.textContent = `你是「${getMyNickname()}」`;
+        els.myNickname.textContent = `你是「${name}」`;
+      }
+      if (els.nicknameInput && document.activeElement !== els.nicknameInput) {
+        els.nicknameInput.value = name;
       }
     }
 
-    async function rollMyNickname() {
-      const next = generateRandomNickname();
-      setMyNickname(next);
+    function applyNicknameChange(nickname, toastMessage) {
+      setMyNickname(nickname);
       updateMyNicknameUI();
       if (selectedNote && isMyNote(selectedNote)) {
         els.pickedAuthor.textContent = `來自我（${getMyNickname()}）`;
       }
       renderNotes();
-      showToast("已換新暱稱，之後丟出的紙條會用新名字");
+      showToast(toastMessage);
+    }
+
+    function saveCustomNickname() {
+      const raw = els.nicknameInput?.value.trim().slice(0, 24) || "";
+      if (!raw) {
+        showToast("請輸入暱稱");
+        els.nicknameInput?.focus();
+        return;
+      }
+      applyNicknameChange(raw, "已設定自訂暱稱");
+    }
+
+    async function rollMyNickname() {
+      applyNicknameChange(generateRandomNickname(), "已隨機換新暱稱");
     }
 
     async function syncNicknameToFirebase(nickname) {
