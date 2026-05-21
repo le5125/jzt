@@ -3181,6 +3181,26 @@
       }
     }
 
+    function getNearbyUnpickedNotes() {
+      return normalizeNotes(applyFilter(notes)).filter((note) =>
+        !isMyNote(note) &&
+        !hasPickedNoteBefore(note.id) &&
+        distanceMeters(currentLocation, note.location) <= NEARBY_RADIUS_METERS
+      );
+    }
+
+    function updateNearbyAlert() {
+      const nearby = getNearbyUnpickedNotes();
+      if (nearby.length > 0) {
+        els.nearbyAlert.textContent = nearby.length === 1
+          ? "附近有一張紙條，點我撿起"
+          : `附近有 ${nearby.length} 張紙條，點我撿起`;
+        els.nearbyAlert.classList.add("show");
+      } else {
+        els.nearbyAlert.classList.remove("show");
+      }
+    }
+
     function renderNotes() {
       if (!markersLayer) return;
       markersLayer.clearLayers();
@@ -3231,22 +3251,13 @@
         }
       });
 
-      const nearby = visibleNotes.filter((note) =>
-        !isMyNote(note) &&
-        distanceMeters(currentLocation, note.location) <= NEARBY_RADIUS_METERS
-      );
-      if (nearby.length > 0) {
-        els.nearbyAlert.textContent = `附近有 ${nearby.length} 張紙條，點我撿起`;
-        els.nearbyAlert.classList.add("show");
-      } else {
-        els.nearbyAlert.classList.remove("show");
-      }
+      updateNearbyAlert();
     }
 
     function pickNearestNote() {
       clearPickReturnContext();
       const nearest = notes
-        .filter((note) => !isMyNote(note))
+        .filter((note) => !isMyNote(note) && !hasPickedNoteBefore(note.id))
         .map((note) => ({
           note,
           distance: distanceMeters(currentLocation, note.location)
@@ -3309,6 +3320,7 @@
         const count = await syncPickCount(note);
         els.pickedCount.textContent = `${count} 次`;
       }
+      updateNearbyAlert();
     }
 
     async function openRepliesSheet() {
@@ -4265,6 +4277,7 @@
 
       pickedNoteIds.add(note.id);
       savePickedNotesLocal();
+      updateNearbyAlert();
       await syncPickedNoteMark(note.id);
       return true;
     }
