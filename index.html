@@ -927,18 +927,21 @@
     }
 
     /* 我的紙條頁：顯示自己的綽號 */
+    .my-nickname-block {
+      margin: 18px 4px 0;
+      display: grid;
+      gap: 12px;
+    }
     .my-nickname-row {
       display: flex;
       align-items: center;
       flex-wrap: wrap;
       gap: 10px;
-      margin: 18px 0 0 4px;
     }
     .my-nickname {
       margin: 0;
       font-family: "Caveat", cursive;
       font-size: 22px;
-      color: var(--ink);
       font-weight: 700;
       display: inline-block;
       padding: 6px 16px;
@@ -949,10 +952,29 @@
       box-shadow: 2px 3px 0 var(--ink);
       transform: rotate(-1deg);
     }
-    .nickname-roll-button {
+    .my-nickname-input {
+      min-width: min(100%, 240px);
+      font-family: "Caveat", cursive;
+      font-size: 22px;
+      font-weight: 700;
+      background: var(--paper-light);
+      color: var(--ink);
+      transform: rotate(-1deg);
+    }
+    .my-nickname-input:focus {
+      box-shadow: 3px 5px 0 var(--tomato);
+      outline: none;
+    }
+    .nickname-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    .nickname-action-button {
       border: 2.5px solid var(--ink);
       border-radius: 14px 18px 13px 17px;
-      padding: 6px 14px;
+      padding: 8px 16px;
       background: var(--mustard);
       color: var(--ink);
       font-family: inherit;
@@ -960,41 +982,18 @@
       font-size: 14px;
       letter-spacing: 0.05em;
       box-shadow: 2px 2px 0 var(--ink);
+      min-height: 44px;
     }
-    .nickname-roll-button:active {
+    .nickname-action-button:active {
       transform: translate(2px, 2px);
       box-shadow: 0 0 0 var(--ink);
     }
-
-    .nickname-panel {
-      display: grid;
-      gap: 10px;
-      margin: 14px 4px 0;
-      padding: 14px;
-      border: 2.5px dashed var(--ink);
-      border-radius: 12px 16px 11px 14px;
+    .nickname-action-button.primary {
+      background: var(--tomato);
+      color: var(--paper);
+    }
+    .nickname-action-button.secondary {
       background: var(--paper);
-    }
-    .nickname-form {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 10px;
-      align-items: center;
-    }
-    .nickname-form input {
-      min-height: 44px;
-      padding: 10px 12px;
-      border: 2.5px solid var(--ink);
-      border-radius: 10px 14px 11px 12px;
-      background: var(--paper-light);
-      font-family: inherit;
-      font-size: 15px;
-      color: var(--ink);
-    }
-    .nickname-form-actions {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
     }
     .nickname-hint {
       margin: 0;
@@ -1735,16 +1734,16 @@
         <h2 id="myNotesTitle">我的紙條</h2>
         <button class="close-button" type="button" data-close>×</button>
       </header>
-      <div class="my-nickname-row">
-        <p id="myNickname" class="my-nickname">—</p>
-      </div>
-      <div class="nickname-panel">
-        <form id="nicknameForm" class="nickname-form">
-          <input id="nicknameInput" type="text" maxlength="24" placeholder="自訂暱稱（最多 24 字）" autocomplete="nickname" />
-          <button id="saveNicknameButton" class="primary-button" type="submit">設定</button>
-        </form>
-        <div class="nickname-form-actions">
-          <button id="rollNicknameButton" class="nickname-roll-button" type="button">隨機換暱稱</button>
+      <div class="my-nickname-block">
+        <div class="my-nickname-row">
+          <p id="myNickname" class="my-nickname">你是「—」</p>
+          <input id="myNicknameInput" class="my-nickname my-nickname-input" type="text" maxlength="24" hidden aria-label="自訂暱稱" />
+        </div>
+        <div class="nickname-actions">
+          <button id="rollNicknameButton" class="nickname-action-button" type="button">隨機換暱稱</button>
+          <button id="editNicknameButton" class="nickname-action-button" type="button">自訂暱稱</button>
+          <button id="confirmNicknameButton" class="nickname-action-button primary" type="button" hidden>確定</button>
+          <button id="cancelNicknameButton" class="nickname-action-button secondary" type="button" hidden>取消</button>
         </div>
         <p class="muted nickname-hint">新暱稱只會套用在之後丟出的紙條。</p>
       </div>
@@ -1990,7 +1989,8 @@
     let userMarker = null;
     let pickedNoteIds = new Set();
 
-    let selectedThrowImages = [];
+    let nicknameEditing = false;
+    let nicknameDraftBeforeEdit = "";
 
     const els = {
       cityButton: document.querySelector("#cityButton"),
@@ -2045,10 +2045,11 @@
       myNotesPage: document.querySelector("#myNotesPage"),
       myNotesList: document.querySelector("#myNotesList"),
       myNickname: document.querySelector("#myNickname"),
-      nicknameForm: document.querySelector("#nicknameForm"),
-      nicknameInput: document.querySelector("#nicknameInput"),
-      saveNicknameButton: document.querySelector("#saveNicknameButton"),
+      myNicknameInput: document.querySelector("#myNicknameInput"),
       rollNicknameButton: document.querySelector("#rollNicknameButton"),
+      editNicknameButton: document.querySelector("#editNicknameButton"),
+      confirmNicknameButton: document.querySelector("#confirmNicknameButton"),
+      cancelNicknameButton: document.querySelector("#cancelNicknameButton"),
       cityForm: document.querySelector("#cityForm"),
       cityInput: document.querySelector("#cityInput"),
       cityResults: document.querySelector("#cityResults"),
@@ -2656,11 +2657,19 @@
     });
     els.openThrowButton.addEventListener("click", () => openSheet("throw"));
     els.myNotesButton.addEventListener("click", () => showMyNotes({ repliesOnly: false }));
-    els.nicknameForm.addEventListener("submit", (event) => {
-      event.preventDefault();
-      saveCustomNickname();
-    });
     els.rollNicknameButton.addEventListener("click", () => rollMyNickname());
+    els.editNicknameButton.addEventListener("click", () => enterNicknameEdit());
+    els.confirmNicknameButton.addEventListener("click", () => confirmNicknameEdit());
+    els.cancelNicknameButton.addEventListener("click", () => cancelNicknameEdit());
+    els.myNicknameInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        confirmNicknameEdit();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        cancelNicknameEdit();
+      }
+    });
     els.replyAlert.addEventListener("click", () => showMyNotes({ repliesOnly: true }));
     els.openRepliesButton.addEventListener("click", () => openRepliesSheet());
     els.pickBackButton.addEventListener("click", () => returnFromPickSheet());
@@ -3528,6 +3537,7 @@
       const requestId = ++myNotesRequestId;
 
       openSheet("myNotes");
+      exitNicknameEdit();
       els.myNotesTitle.textContent = repliesOnly ? "有回覆的紙條" : "我的紙條";
       updateMyNicknameUI();
       els.myNotesList.innerHTML = '<p class="muted">載入中…</p>';
@@ -4355,13 +4365,41 @@
       return generated;
     }
 
+    function setNicknameEditMode(editing) {
+      nicknameEditing = editing;
+      if (els.myNickname) els.myNickname.hidden = editing;
+      if (els.myNicknameInput) els.myNicknameInput.hidden = !editing;
+      if (els.rollNicknameButton) els.rollNicknameButton.hidden = editing;
+      if (els.editNicknameButton) els.editNicknameButton.hidden = editing;
+      if (els.confirmNicknameButton) els.confirmNicknameButton.hidden = !editing;
+      if (els.cancelNicknameButton) els.cancelNicknameButton.hidden = !editing;
+    }
+
+    function enterNicknameEdit() {
+      nicknameDraftBeforeEdit = getMyNickname();
+      if (els.myNicknameInput) {
+        els.myNicknameInput.value = nicknameDraftBeforeEdit;
+      }
+      setNicknameEditMode(true);
+      requestAnimationFrame(() => {
+        els.myNicknameInput?.focus();
+        els.myNicknameInput?.select();
+      });
+    }
+
+    function exitNicknameEdit() {
+      nicknameDraftBeforeEdit = "";
+      setNicknameEditMode(false);
+      updateMyNicknameUI();
+    }
+
     function updateMyNicknameUI() {
       const name = getMyNickname();
-      if (els.myNickname) {
+      if (els.myNickname && !nicknameEditing) {
         els.myNickname.textContent = `你是「${name}」`;
       }
-      if (els.nicknameInput && document.activeElement !== els.nicknameInput) {
-        els.nicknameInput.value = name;
+      if (els.myNicknameInput && nicknameEditing && document.activeElement !== els.myNicknameInput) {
+        els.myNicknameInput.value = name;
       }
     }
 
@@ -4375,17 +4413,26 @@
       showToast(toastMessage);
     }
 
-    function saveCustomNickname() {
-      const raw = els.nicknameInput?.value.trim().slice(0, 24) || "";
+    function confirmNicknameEdit() {
+      const raw = els.myNicknameInput?.value.trim().slice(0, 24) || "";
       if (!raw) {
         showToast("請輸入暱稱");
-        els.nicknameInput?.focus();
+        els.myNicknameInput?.focus();
         return;
       }
       applyNicknameChange(raw, "已設定自訂暱稱");
+      exitNicknameEdit();
+    }
+
+    function cancelNicknameEdit() {
+      if (els.myNicknameInput) {
+        els.myNicknameInput.value = nicknameDraftBeforeEdit || getMyNickname();
+      }
+      exitNicknameEdit();
     }
 
     async function rollMyNickname() {
+      if (nicknameEditing) exitNicknameEdit();
       applyNicknameChange(generateRandomNickname(), "已隨機換新暱稱");
     }
 
