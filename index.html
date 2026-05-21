@@ -1469,6 +1469,37 @@
       font-size: 15px;
     }
 
+    .share-dialog h3 {
+      margin: 0 0 10px;
+      font-family: "Caveat", cursive;
+      font-size: 28px;
+      color: var(--ink);
+      letter-spacing: 0.04em;
+    }
+    .share-dialog-lead {
+      margin: 0 0 16px;
+      font-size: 15px;
+      line-height: 1.6;
+      color: var(--ink-soft);
+    }
+    .share-dialog-app {
+      margin: 0 0 6px;
+      font-size: 18px;
+      font-weight: 900;
+      color: var(--ink);
+    }
+    .share-dialog-url {
+      margin: 0 0 20px;
+      padding: 12px 14px;
+      border: 2.5px dashed var(--ink);
+      border-radius: 10px 14px 11px 12px;
+      background: var(--paper);
+      font-size: 14px;
+      line-height: 1.5;
+      word-break: break-all;
+      color: var(--ink);
+    }
+
     @media (max-width: 380px) {
       .note-meta { grid-template-columns: 1fr 1fr; }
       .bottom-tab.left { padding-left: 18px; }
@@ -1563,6 +1594,15 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 12a9 9 0 11-3-6.7L21 8"/>
           <path d="M21 3v5h-5"/>
+        </svg>
+      </button>
+      <!-- 分享 -->
+      <button id="shareAppButton" class="side-button" type="button" title="分享給朋友">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="18" cy="5" r="3"/>
+          <circle cx="6" cy="12" r="3"/>
+          <circle cx="18" cy="19" r="3"/>
+          <path d="M8.6 13.5l6.8 3.9M15.4 6.6L8.6 10.5"/>
         </svg>
       </button>
     </div>
@@ -1700,6 +1740,19 @@
       </div>
     </div>
 
+    <div id="shareBackdrop" class="dialog-backdrop" aria-hidden="true">
+      <div class="dialog-box share-dialog" role="dialog" aria-labelledby="shareDialogTitle">
+        <h3 id="shareDialogTitle">分享丟紙條</h3>
+        <p class="share-dialog-lead">複製網址，分享朋友就能一起丟紙條。</p>
+        <p class="share-dialog-app">丟紙條</p>
+        <p id="shareAppUrl" class="share-dialog-url">https://liff.line.me/2010143431-l2kcIl8v</p>
+        <div class="dialog-actions">
+          <button id="shareCopyButton" class="primary-button" type="button">複製網址</button>
+          <button id="shareCloseButton" class="secondary-button" type="button">關閉</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 回覆全頁（像 FB 留言） -->
     <section id="replySheet" class="sheet sheet-tall" aria-label="回覆">
       <header class="sheet-header sheet-header-with-back">
@@ -1792,6 +1845,8 @@
       留空白 = 直接用網頁版（在 LINE 外面打開也能正常運作）
     */
     const LIFF_ID = "2010143431-l2kcIl8v";
+    const SHARE_APP_URL = `https://liff.line.me/${LIFF_ID}`;
+    const SHARE_APP_TEXT = `丟紙團\n${SHARE_APP_URL}`;
     const DAILY_LIMIT = 5;
     const DAILY_IMAGE_LIMIT = 2;
     const MAX_IMAGES_PER_NOTE = 1;
@@ -2010,6 +2065,11 @@
       locateText: document.querySelector("#locateText"),
       locateButton: document.querySelector("#locateButton"),
       refreshButton: document.querySelector("#refreshButton"),
+      shareAppButton: document.querySelector("#shareAppButton"),
+      shareBackdrop: document.querySelector("#shareBackdrop"),
+      shareAppUrl: document.querySelector("#shareAppUrl"),
+      shareCopyButton: document.querySelector("#shareCopyButton"),
+      shareCloseButton: document.querySelector("#shareCloseButton"),
       nearbyListButton: document.querySelector("#nearbyListButton"),
       nearbySheet: document.querySelector("#nearbySheet"),
       nearbyList: document.querySelector("#nearbyList"),
@@ -2667,6 +2727,13 @@
       }, 600);
       showToast("已重新整理");
     });
+    els.shareAppButton.addEventListener("click", () => openShareDialog());
+    els.shareCopyButton.addEventListener("click", () => copyShareLink());
+    els.shareCloseButton.addEventListener("click", () => closeShareDialog());
+    els.shareBackdrop.addEventListener("click", (event) => {
+      if (event.target === els.shareBackdrop) closeShareDialog();
+    });
+    if (els.shareAppUrl) els.shareAppUrl.textContent = SHARE_APP_URL;
     els.openThrowButton.addEventListener("click", () => openSheet("throw"));
     els.myNotesButton.addEventListener("click", () => showMyNotes({ repliesOnly: false }));
     els.rollNicknameButton.addEventListener("click", () => rollMyNickname());
@@ -4720,6 +4787,41 @@
       els.toast.textContent = message;
       els.toast.classList.add("show");
       window.setTimeout(() => els.toast.classList.remove("show"), 2200);
+    }
+
+    function openShareDialog() {
+      if (els.shareAppUrl) els.shareAppUrl.textContent = SHARE_APP_URL;
+      els.shareBackdrop?.classList.add("show");
+    }
+
+    function closeShareDialog() {
+      els.shareBackdrop?.classList.remove("show");
+    }
+
+    async function copyShareLink() {
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(SHARE_APP_TEXT);
+        } else {
+          throw new Error("clipboard unavailable");
+        }
+        showToast("已複製分享內容");
+      } catch {
+        try {
+          const area = document.createElement("textarea");
+          area.value = SHARE_APP_TEXT;
+          area.setAttribute("readonly", "");
+          area.style.position = "fixed";
+          area.style.left = "-9999px";
+          document.body.appendChild(area);
+          area.select();
+          document.execCommand("copy");
+          document.body.removeChild(area);
+          showToast("已複製分享內容");
+        } catch {
+          showToast("複製失敗，請長按網址手動複製");
+        }
+      }
     }
 
     /*
