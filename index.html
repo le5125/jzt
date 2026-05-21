@@ -927,8 +927,15 @@
     }
 
     /* 我的紙條頁：顯示自己的綽號 */
-    .my-nickname {
+    .my-nickname-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
       margin: 18px 0 0 4px;
+    }
+    .my-nickname {
+      margin: 0;
       font-family: "Caveat", cursive;
       font-size: 22px;
       color: var(--ink);
@@ -941,6 +948,22 @@
       border-radius: 14px 18px 13px 16px;
       box-shadow: 2px 3px 0 var(--ink);
       transform: rotate(-1deg);
+    }
+    .nickname-roll-button {
+      border: 2.5px solid var(--ink);
+      border-radius: 14px 18px 13px 17px;
+      padding: 6px 14px;
+      background: var(--mustard);
+      color: var(--ink);
+      font-family: inherit;
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: 0.05em;
+      box-shadow: 2px 2px 0 var(--ink);
+    }
+    .nickname-roll-button:active {
+      transform: translate(2px, 2px);
+      box-shadow: 0 0 0 var(--ink);
     }
 
     .note-content {
@@ -1677,7 +1700,10 @@
         <h2 id="myNotesTitle">我的紙條</h2>
         <button class="close-button" type="button" data-close>×</button>
       </header>
-      <p id="myNickname" class="my-nickname">—</p>
+      <div class="my-nickname-row">
+        <p id="myNickname" class="my-nickname">—</p>
+        <button id="rollNicknameButton" class="nickname-roll-button" type="button">換暱稱</button>
+      </div>
       <div id="myNotesList" class="note-list"></div>
     </section>
   </main>
@@ -1861,6 +1887,7 @@
       localStorage.setItem("jzt_demo_uid", currentUserId);
       restoreLastLocation();
       if (!notes.length) applyNotesCache();
+      loadMyNicknameFromFirebase().catch((err) => console.warn("[暱稱] 同步失敗", err));
     }
 
     async function ensureAuth() {
@@ -1974,6 +2001,7 @@
       myNotesPage: document.querySelector("#myNotesPage"),
       myNotesList: document.querySelector("#myNotesList"),
       myNickname: document.querySelector("#myNickname"),
+      rollNicknameButton: document.querySelector("#rollNicknameButton"),
       cityForm: document.querySelector("#cityForm"),
       cityInput: document.querySelector("#cityInput"),
       cityResults: document.querySelector("#cityResults"),
@@ -2248,6 +2276,7 @@
       return normalizeNote({
         id: doc.id,
         authorUid: data.authorUid,
+        authorNickname: data.authorNickname || "",
         type: data.type,
         content: data.content,
         imageUrl: imageUrls[0] || "",
@@ -2580,6 +2609,7 @@
     });
     els.openThrowButton.addEventListener("click", () => openSheet("throw"));
     els.myNotesButton.addEventListener("click", () => showMyNotes({ repliesOnly: false }));
+    els.rollNicknameButton.addEventListener("click", () => rollMyNickname());
     els.replyAlert.addEventListener("click", () => showMyNotes({ repliesOnly: true }));
     els.openRepliesButton.addEventListener("click", () => openRepliesSheet());
     els.pickBackButton.addEventListener("click", () => returnFromPickSheet());
@@ -2778,6 +2808,7 @@
       const note = {
         id: crypto.randomUUID(),
         authorUid: currentUserId,
+        authorNickname: getMyNickname(),
         type: imageFile ? "image" : "text",
         content,
         imageUrl: "",
@@ -3108,7 +3139,7 @@
           const meta = document.createElement("span");
           meta.className = "muted";
           const distText = distance < 1000 ? `${Math.round(distance)} 公尺` : `${(distance / 1000).toFixed(1)} 公里`;
-          meta.textContent = `${isMine ? "📜 我的" : "📃 " + nicknameOf(note.authorUid)} · ${note.city || "—"} · ${distText} · 被撿起 ${note.pickedCount} 次 · ${formatNoteTimesMeta(note)}`;
+          meta.textContent = `${isMine ? "📜 我的" : "📃 " + nicknameOf(note.authorUid, note)} · ${note.city || "—"} · ${distText} · 被撿起 ${note.pickedCount} 次 · ${formatNoteTimesMeta(note)}`;
           card.appendChild(meta);
 
           card.addEventListener("click", () => {
@@ -3286,7 +3317,7 @@
       openSheet("pick");
       updatePickBackButton();
       renderPickedNote(note);
-      els.pickedAuthor.textContent = isOwn ? `來自我（${nicknameOf(note.authorUid)}）` : `來自 ${nicknameOf(note.authorUid)}`;
+      els.pickedAuthor.textContent = isOwn ? `來自我（${nicknameOf(note.authorUid, note)}）` : `來自 ${nicknameOf(note.authorUid, note)}`;
       els.pickedAuthor.classList.toggle("mine", isOwn);
 
       const canFollow = !isOwn && note.authorUid !== "seed";
@@ -3447,7 +3478,7 @@
 
       openSheet("myNotes");
       els.myNotesTitle.textContent = repliesOnly ? "有回覆的紙條" : "我的紙條";
-      els.myNickname.textContent = `你是「${nicknameOf(currentUserId)}」`;
+      updateMyNicknameUI();
       els.myNotesList.innerHTML = '<p class="muted">載入中…</p>';
 
       try {
@@ -3722,6 +3753,7 @@
       const expiresAt = addDays(new Date(), 30);
       const docRef = await addDoc(collection(db, "notes"), {
         authorUid: currentUserId,
+        authorNickname: getMyNickname(),
         type: note.type,
         content: note.content,
         imageUrl: note.imageUrl || getNoteImageUrls(note)[0] || "",
@@ -4207,9 +4239,7 @@
 
     /*
       ============= 匿名綽號系統 =============
-      根據 UID 生成穩定的「形容詞 + 動物 + #編號」
-      同一個 UID 永遠生成同一個綽號
-      範例：沉默的螢火蟲 #4291、漂泊的水獺 #1023
+      可自己換暱稱；每張紙條會記下丟出當下的名字
     */
     const NICKNAME_ADJECTIVES = [
       "沉默的", "漂泊的", "夜行的", "輕盈的", "悠遊的", "勇敢的",
@@ -4226,24 +4256,106 @@
       "藍鵲", "綠繡眼", "夜鶯", "杜鵑", "信天翁", "企鵝", "海馬"
     ];
 
-    // 把 UID 字串雜湊成一個非負整數
     function hashStr(str) {
       let h = 5381;
       for (let i = 0; i < str.length; i++) {
         h = ((h << 5) + h) + str.charCodeAt(i);
-        h = h & 0xffffffff;  // 保持 32 bit
+        h = h & 0xffffffff;
       }
       return Math.abs(h);
     }
 
-    function nicknameOf(uid) {
-      if (!uid) return "路過的旅人";
-      if (uid === "seed") return "投條問路使者";
+    function generateRandomNickname() {
+      const adj = NICKNAME_ADJECTIVES[Math.floor(Math.random() * NICKNAME_ADJECTIVES.length)];
+      const ani = NICKNAME_ANIMALS[Math.floor(Math.random() * NICKNAME_ANIMALS.length)];
+      const num = Math.floor(Math.random() * 9000) + 1000;
+      return `${adj}${ani} #${num}`;
+    }
+
+    function nicknameStorageKey(uid) {
+      return `jzt_nickname_${uid || "guest"}`;
+    }
+
+    function getStoredNickname(uid) {
+      if (!uid) return "";
+      try {
+        return localStorage.getItem(nicknameStorageKey(uid)) || "";
+      } catch {
+        return "";
+      }
+    }
+
+    function setMyNickname(nickname, options = {}) {
+      const name = (nickname || "").trim().slice(0, 24);
+      if (!name) return;
+      try {
+        localStorage.setItem(nicknameStorageKey(currentUserId), name);
+      } catch {}
+      if (!options.skipSync) {
+        syncNicknameToFirebase(name).catch((err) => console.warn("[暱稱] 雲端同步失敗", err));
+      }
+    }
+
+    function getMyNickname() {
+      const saved = getStoredNickname(currentUserId);
+      if (saved) return saved;
+      const generated = generateRandomNickname();
+      setMyNickname(generated, { skipSync: true });
+      return generated;
+    }
+
+    function updateMyNicknameUI() {
+      if (els.myNickname) {
+        els.myNickname.textContent = `你是「${getMyNickname()}」`;
+      }
+    }
+
+    async function rollMyNickname() {
+      const next = generateRandomNickname();
+      setMyNickname(next);
+      updateMyNicknameUI();
+      if (selectedNote && isMyNote(selectedNote)) {
+        els.pickedAuthor.textContent = `來自我（${getMyNickname()}）`;
+      }
+      renderNotes();
+      showToast("已換新暱稱，之後丟出的紙條會用新名字");
+    }
+
+    async function syncNicknameToFirebase(nickname) {
+      if (!hasFirebase || !nickname) return;
+      await ensureAuth();
+      const { doc, setDoc } = firebaseApi.firestoreModule;
+      await setDoc(doc(db, "users", currentUserId), { nickname }, { merge: true });
+    }
+
+    async function loadMyNicknameFromFirebase() {
+      if (!hasFirebase) return;
+      try {
+        await ensureAuth();
+        const { doc, getDoc } = firebaseApi.firestoreModule;
+        const snap = await getDoc(doc(db, "users", currentUserId));
+        if (snap.exists() && snap.data().nickname) {
+          setMyNickname(snap.data().nickname, { skipSync: true });
+        }
+      } catch (err) {
+        console.warn("[暱稱] 雲端讀取失敗", err);
+      }
+    }
+
+    function legacyNicknameOf(uid) {
       const h = hashStr(uid);
       const adj = NICKNAME_ADJECTIVES[h % NICKNAME_ADJECTIVES.length];
       const ani = NICKNAME_ANIMALS[Math.floor(h / NICKNAME_ADJECTIVES.length) % NICKNAME_ANIMALS.length];
-      const num = (h % 9000) + 1000;  // 1000~9999 編號
+      const num = (h % 9000) + 1000;
       return `${adj}${ani} #${num}`;
+    }
+
+    function nicknameOf(uid, note = null) {
+      if (!uid) return "路過的旅人";
+      if (uid === "seed") return "投條問路使者";
+      if (note?.authorNickname) return note.authorNickname;
+      if (getMyAuthorUids().has(uid)) return getMyNickname();
+      return legacyNicknameOf(uid);
     }
 
     async function recordNotePick(note) {
