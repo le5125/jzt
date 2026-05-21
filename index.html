@@ -951,19 +951,30 @@
       border-radius: 14px 18px 13px 16px;
       box-shadow: 2px 3px 0 var(--ink);
       transform: rotate(-1deg);
+      transition: background 0.25s ease, color 0.25s ease;
     }
-    .my-nickname-input {
-      min-width: min(100%, 240px);
-      font-family: "Caveat", cursive;
-      font-size: 22px;
-      font-weight: 700;
-      background: var(--paper-light);
-      color: var(--ink);
-      transform: rotate(-1deg);
-    }
-    .my-nickname-input:focus {
+    .my-nickname.tone-olive { background: var(--olive); color: var(--paper-light); }
+    .my-nickname.tone-tomato { background: var(--tomato); color: var(--paper-light); }
+    .my-nickname.tone-mustard { background: var(--mustard); color: var(--ink); }
+    .my-nickname.tone-sky { background: var(--sky); color: var(--ink); }
+    .my-nickname.tone-rose { background: var(--rose); color: var(--ink); }
+    .my-nickname.tone-ink { background: var(--ink); color: var(--paper-light); }
+    .my-nickname.editing {
       box-shadow: 3px 5px 0 var(--tomato);
+    }
+    .my-nickname-text {
+      display: inline;
       outline: none;
+      min-width: 1em;
+    }
+    .my-nickname-text[contenteditable="true"] {
+      cursor: text;
+      border-bottom: 2px dashed rgba(255, 248, 227, 0.85);
+    }
+    .my-nickname.tone-mustard .my-nickname-text[contenteditable="true"],
+    .my-nickname.tone-sky .my-nickname-text[contenteditable="true"],
+    .my-nickname.tone-rose .my-nickname-text[contenteditable="true"] {
+      border-bottom-color: rgba(31, 24, 18, 0.35);
     }
     .nickname-actions {
       display: flex;
@@ -1736,8 +1747,9 @@
       </header>
       <div class="my-nickname-block">
         <div class="my-nickname-row">
-          <p id="myNickname" class="my-nickname">你是「—」</p>
-          <input id="myNicknameInput" class="my-nickname my-nickname-input" type="text" maxlength="24" hidden aria-label="自訂暱稱" />
+          <p id="myNickname" class="my-nickname tone-olive">
+            你是「<span id="myNicknameText" class="my-nickname-text">—</span>」
+          </p>
         </div>
         <div class="nickname-actions">
           <button id="rollNicknameButton" class="nickname-action-button" type="button">隨機換暱稱</button>
@@ -2045,7 +2057,7 @@
       myNotesPage: document.querySelector("#myNotesPage"),
       myNotesList: document.querySelector("#myNotesList"),
       myNickname: document.querySelector("#myNickname"),
-      myNicknameInput: document.querySelector("#myNicknameInput"),
+      myNicknameText: document.querySelector("#myNicknameText"),
       rollNicknameButton: document.querySelector("#rollNicknameButton"),
       editNicknameButton: document.querySelector("#editNicknameButton"),
       confirmNicknameButton: document.querySelector("#confirmNicknameButton"),
@@ -2661,13 +2673,21 @@
     els.editNicknameButton.addEventListener("click", () => enterNicknameEdit());
     els.confirmNicknameButton.addEventListener("click", () => confirmNicknameEdit());
     els.cancelNicknameButton.addEventListener("click", () => cancelNicknameEdit());
-    els.myNicknameInput.addEventListener("keydown", (event) => {
+    els.myNicknameText.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
         confirmNicknameEdit();
       } else if (event.key === "Escape") {
         event.preventDefault();
         cancelNicknameEdit();
+      }
+    });
+    els.myNicknameText.addEventListener("input", () => {
+      if (!nicknameEditing || !els.myNicknameText) return;
+      const text = els.myNicknameText.textContent || "";
+      if (text.length > 24) {
+        els.myNicknameText.textContent = text.slice(0, 24);
+        placeCaretAtEnd(els.myNicknameText);
       }
     });
     els.replyAlert.addEventListener("click", () => showMyNotes({ repliesOnly: true }));
@@ -4365,10 +4385,72 @@
       return generated;
     }
 
+    const NICKNAME_TONES = ["olive", "tomato", "mustard", "sky", "rose", "ink"];
+
+    function nicknameToneStorageKey(uid) {
+      return `jzt_nickname_tone_${uid || "guest"}`;
+    }
+
+    function getStoredNicknameTone(uid) {
+      try {
+        const tone = localStorage.getItem(nicknameToneStorageKey(uid));
+        return NICKNAME_TONES.includes(tone) ? tone : "olive";
+      } catch {
+        return "olive";
+      }
+    }
+
+    function setMyNicknameTone(tone, options = {}) {
+      const next = NICKNAME_TONES.includes(tone) ? tone : "olive";
+      try {
+        localStorage.setItem(nicknameToneStorageKey(currentUserId), next);
+      } catch {}
+      applyNicknameTone(next);
+      if (!options.skipSync && hasFirebase) {
+        syncNicknameStyleToFirebase(next).catch((err) => console.warn("[暱稱] 顏色同步失敗", err));
+      }
+    }
+
+    function applyNicknameTone(tone) {
+      if (!els.myNickname) return;
+      NICKNAME_TONES.forEach((item) => els.myNickname.classList.remove(`tone-${item}`));
+      els.myNickname.classList.add(`tone-${tone}`);
+    }
+
+    function rollNicknameTone() {
+      const current = getStoredNicknameTone(currentUserId);
+      let next = current;
+      while (NICKNAME_TONES.length > 1 && next === current) {
+        next = NICKNAME_TONES[Math.floor(Math.random() * NICKNAME_TONES.length)];
+      }
+      setMyNicknameTone(next);
+      return next;
+    }
+
+    async function syncNicknameStyleToFirebase(tone) {
+      if (!hasFirebase) return;
+      await ensureAuth();
+      const { doc, setDoc } = firebaseApi.firestoreModule;
+      await setDoc(doc(db, "users", currentUserId), { nicknameTone: tone }, { merge: true });
+    }
+
+    function placeCaretAtEnd(element) {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }
+
+    function readEditableNickname() {
+      return (els.myNicknameText?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 24);
+    }
+
     function setNicknameEditMode(editing) {
       nicknameEditing = editing;
-      if (els.myNickname) els.myNickname.hidden = editing;
-      if (els.myNicknameInput) els.myNicknameInput.hidden = !editing;
+      if (els.myNickname) els.myNickname.classList.toggle("editing", editing);
+      if (els.myNicknameText) els.myNicknameText.contentEditable = editing ? "true" : "false";
       if (els.rollNicknameButton) els.rollNicknameButton.hidden = editing;
       if (els.editNicknameButton) els.editNicknameButton.hidden = editing;
       if (els.confirmNicknameButton) els.confirmNicknameButton.hidden = !editing;
@@ -4377,13 +4459,13 @@
 
     function enterNicknameEdit() {
       nicknameDraftBeforeEdit = getMyNickname();
-      if (els.myNicknameInput) {
-        els.myNicknameInput.value = nicknameDraftBeforeEdit;
+      if (els.myNicknameText) {
+        els.myNicknameText.textContent = nicknameDraftBeforeEdit;
       }
       setNicknameEditMode(true);
       requestAnimationFrame(() => {
-        els.myNicknameInput?.focus();
-        els.myNicknameInput?.select();
+        els.myNicknameText?.focus();
+        placeCaretAtEnd(els.myNicknameText);
       });
     }
 
@@ -4395,12 +4477,10 @@
 
     function updateMyNicknameUI() {
       const name = getMyNickname();
-      if (els.myNickname && !nicknameEditing) {
-        els.myNickname.textContent = `你是「${name}」`;
+      if (els.myNicknameText && document.activeElement !== els.myNicknameText) {
+        els.myNicknameText.textContent = name;
       }
-      if (els.myNicknameInput && nicknameEditing && document.activeElement !== els.myNicknameInput) {
-        els.myNicknameInput.value = name;
-      }
+      applyNicknameTone(getStoredNicknameTone(currentUserId));
     }
 
     function applyNicknameChange(nickname, toastMessage) {
@@ -4414,10 +4494,10 @@
     }
 
     function confirmNicknameEdit() {
-      const raw = els.myNicknameInput?.value.trim().slice(0, 24) || "";
+      const raw = readEditableNickname();
       if (!raw) {
         showToast("請輸入暱稱");
-        els.myNicknameInput?.focus();
+        els.myNicknameText?.focus();
         return;
       }
       applyNicknameChange(raw, "已設定自訂暱稱");
@@ -4425,15 +4505,16 @@
     }
 
     function cancelNicknameEdit() {
-      if (els.myNicknameInput) {
-        els.myNicknameInput.value = nicknameDraftBeforeEdit || getMyNickname();
+      if (els.myNicknameText) {
+        els.myNicknameText.textContent = nicknameDraftBeforeEdit || getMyNickname();
       }
       exitNicknameEdit();
     }
 
     async function rollMyNickname() {
       if (nicknameEditing) exitNicknameEdit();
-      applyNicknameChange(generateRandomNickname(), "已隨機換新暱稱");
+      rollNicknameTone();
+      applyNicknameChange(generateRandomNickname(), "已隨機換新暱稱與顏色");
     }
 
     async function syncNicknameToFirebase(nickname) {
@@ -4449,8 +4530,14 @@
         await ensureAuth();
         const { doc, getDoc } = firebaseApi.firestoreModule;
         const snap = await getDoc(doc(db, "users", currentUserId));
-        if (snap.exists() && snap.data().nickname) {
-          setMyNickname(snap.data().nickname, { skipSync: true });
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.nickname) {
+            setMyNickname(data.nickname, { skipSync: true });
+          }
+          if (NICKNAME_TONES.includes(data.nicknameTone)) {
+            setMyNicknameTone(data.nicknameTone, { skipSync: true });
+          }
         }
       } catch (err) {
         console.warn("[暱稱] 雲端讀取失敗", err);
