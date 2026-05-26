@@ -3548,26 +3548,26 @@
       els.pickedContent.appendChild(text);
     }
 
- async function submitReply(reply) {
+async function submitReply(reply) {
       if (!selectedNote || replyingInProgress) return;
 
       replyingInProgress = true;
       updateReplySubmitState();
 
-      // 鎖定當下目標紙條，避免使用者中途切換紙條時錯亂
       const targetNote = selectedNote;
+      const tempId = crypto.randomUUID();
       const newReply = {
-        id: crypto.randomUUID(),
+        id: tempId,
         authorUid: currentUserId,
         type: reply.type,
         content: reply.content,
         createdAt: new Date().toISOString(),
-        _pending: true   // 標記：本地產生、Firebase 尚未確認
+        _pending: true
       };
 
-      // 立刻把回覆插到最前面（樂觀更新 = 使用者馬上看到）
+      // 樂觀更新：先在本地顯示
       const existing = repliesCache.get(targetNote.id) || [];
-      const merged = [newReply, ...existing.filter((r) => r.id !== newReply.id)];
+      const merged = [newReply, ...existing.filter((r) => r.id !== tempId)];
       repliesCache.set(targetNote.id, merged);
       if (selectedNote?.id === targetNote.id) {
         selectedReplies = merged;
@@ -3576,11 +3576,11 @@
       }
       showToast("已送出");
 
-      // 背景寫 Firebase
       try {
-        await saveReply(targetNote, newReply);
+        // ★ 拿回 Firestore 給的真實 id
+        const realId = await saveReply(targetNote, { ...newReply, id: tempId });
 
-        // 寫成功——更新紙條計數與時間
+        // 更新紙條計數
         targetNote.replyCount = (targetNote.replyCount || 0) + 1;
         targetNote.lastActivityAt = newReply.createdAt;
         const noteIndex = notes.findIndex((item) => item.id === targetNote.id);
@@ -3590,10 +3590,11 @@
           saveNotesCache();
         }
 
-        // 把本地那則的 _pending 拿掉（已確認）
+        // ★★ 關鍵：把本地那則的 id 換成 Firestore 的 id
+        // 這樣等下 onSnapshot 回來時，去重邏輯能認出「這是同一則」
         const cached = repliesCache.get(targetNote.id) || [];
         const updated = cached.map((r) =>
-          r.id === newReply.id ? { ...r, _pending: false } : r
+          r.id === tempId ? { ...r, id: realId, _pending: false } : r
         );
         repliesCache.set(targetNote.id, updated);
 
@@ -3608,9 +3609,9 @@
         updateReplyAlert();
       } catch (error) {
         console.error("[回覆] 送出失敗", error);
-        // 失敗——把本地那則回覆移除
+        // 失敗：移除本地那則
         const cached = repliesCache.get(targetNote.id) || [];
-        const rolled = cached.filter((item) => item.id !== newReply.id);
+        const rolled = cached.filter((item) => item.id !== tempId);
         repliesCache.set(targetNote.id, rolled);
         if (selectedNote?.id === targetNote.id) {
           selectedReplies = rolled;
@@ -3623,7 +3624,6 @@
         updateReplySubmitState();
       }
     }
-
     function renderReplies() {
       els.replyList.innerHTML = "";
       if (!selectedReplies.length) {
@@ -4069,14 +4069,14 @@
       await deleteDoc(doc(db, "notes", note.id));
     }
 
-    async function saveReply(note, reply) {
+  async function saveReply(note, reply) {
       if (!hasFirebase || note.id.startsWith("seed-")) {
         const key = `jzt_replies_${note.id}`;
         const saved = JSON.parse(localStorage.getItem(key) || "[]");
         saved.unshift(reply);
         localStorage.setItem(key, JSON.stringify(saved));
         note.lastActivityAt = reply.createdAt;
-        return;
+        return reply.id;
       }
 
       await ensureAuth();
@@ -4090,7 +4090,8 @@
         updateDoc
       } = firebaseApi.firestoreModule;
 
-      await withTimeout(
+      // ★ 接住 Firestore 給的 docRef，把它的 id 回傳出去
+      const docRef = await withTimeout(
         addDoc(collection(db, "notes", note.id, "replies"), {
           authorUid: currentUserId,
           type: reply.type,
@@ -4113,8 +4114,9 @@
       } catch (err) {
         console.warn("[回覆] 計數更新失敗，回覆內容已儲存", err);
       }
-    }
 
+      return docRef.id;   // ★ 把真實 Firestore id 給呼叫端
+    }
     function mapReplyDoc(doc) {
       const data = doc.data();
       return {
