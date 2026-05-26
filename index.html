@@ -2777,11 +2777,12 @@
       updateReplySubmitState();
     });
     els.replyInput.addEventListener("compositionend", updateReplySubmitState);
-    els.replyForm.addEventListener("submit", async (event) => {
+  els.replyForm.addEventListener("submit", (event) => {
       event.preventDefault();
       const content = els.replyInput.value.trim().slice(0, 140);
       if (!content || !selectedNote || replyingInProgress) return;
-      await submitReply({ type: "text", content });
+      // 不 await！立刻關抽屜，讓 submitReply 在背景跑
+      submitReply({ type: "text", content });
       els.replyInput.value = "";
       els.replyCountText.textContent = "140 字";
       updateReplySubmitState();
@@ -3547,54 +3548,78 @@
       els.pickedContent.appendChild(text);
     }
 
-    async function submitReply(reply) {
+ async function submitReply(reply) {
       if (!selectedNote || replyingInProgress) return;
 
       replyingInProgress = true;
       updateReplySubmitState();
-      const prevSubmitLabel = els.submitReplyButton.textContent;
-      els.submitReplyButton.textContent = "送出中…";
 
+      // 鎖定當下目標紙條，避免使用者中途切換紙條時錯亂
+      const targetNote = selectedNote;
       const newReply = {
         id: crypto.randomUUID(),
         authorUid: currentUserId,
         type: reply.type,
         content: reply.content,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        _pending: true   // 標記：本地產生、Firebase 尚未確認
       };
 
-      selectedReplies.unshift(newReply);
-      repliesCache.set(selectedNote.id, [...selectedReplies]);
-      updateReplyEntryCount();
-      renderReplies();
+      // 立刻把回覆插到最前面（樂觀更新 = 使用者馬上看到）
+      const existing = repliesCache.get(targetNote.id) || [];
+      const merged = [newReply, ...existing.filter((r) => r.id !== newReply.id)];
+      repliesCache.set(targetNote.id, merged);
+      if (selectedNote?.id === targetNote.id) {
+        selectedReplies = merged;
+        updateReplyEntryCount();
+        renderReplies();
+      }
+      showToast("已送出");
 
+      // 背景寫 Firebase
       try {
-        await saveReply(selectedNote, newReply);
-        selectedNote.replyCount = (selectedNote.replyCount || 0) + 1;
-        selectedNote.lastActivityAt = newReply.createdAt;
-        const noteIndex = notes.findIndex((item) => item.id === selectedNote.id);
+        await saveReply(targetNote, newReply);
+
+        // 寫成功——更新紙條計數與時間
+        targetNote.replyCount = (targetNote.replyCount || 0) + 1;
+        targetNote.lastActivityAt = newReply.createdAt;
+        const noteIndex = notes.findIndex((item) => item.id === targetNote.id);
         if (noteIndex >= 0) {
-          notes[noteIndex] = { ...notes[noteIndex], ...selectedNote };
+          notes[noteIndex] = { ...notes[noteIndex], ...targetNote };
           notes = sortNotesByActivity(notes);
           saveNotesCache();
         }
-        els.pickedCount.textContent = `${selectedNote.pickedCount} 次`;
-        updatePickedTimes(selectedNote);
-        updateReplyEntryCount();
-        renderReplies();
+
+        // 把本地那則的 _pending 拿掉（已確認）
+        const cached = repliesCache.get(targetNote.id) || [];
+        const updated = cached.map((r) =>
+          r.id === newReply.id ? { ...r, _pending: false } : r
+        );
+        repliesCache.set(targetNote.id, updated);
+
+        if (selectedNote?.id === targetNote.id) {
+          selectedReplies = updated;
+          els.pickedCount.textContent = `${targetNote.pickedCount} 次`;
+          updatePickedTimes(targetNote);
+          updateReplyEntryCount();
+          renderReplies();
+        }
         renderNotes();
         updateReplyAlert();
-        showToast("已送出回覆");
       } catch (error) {
         console.error("[回覆] 送出失敗", error);
-        selectedReplies = selectedReplies.filter((item) => item.id !== newReply.id);
-        repliesCache.set(selectedNote.id, [...selectedReplies]);
-        renderReplies();
-        updateReplyEntryCount();
+        // 失敗——把本地那則回覆移除
+        const cached = repliesCache.get(targetNote.id) || [];
+        const rolled = cached.filter((item) => item.id !== newReply.id);
+        repliesCache.set(targetNote.id, rolled);
+        if (selectedNote?.id === targetNote.id) {
+          selectedReplies = rolled;
+          renderReplies();
+          updateReplyEntryCount();
+        }
         showToast(error?.message?.includes("逾時") ? error.message : "回覆失敗，請稍後再試");
       } finally {
         replyingInProgress = false;
-        els.submitReplyButton.textContent = prevSubmitLabel;
         updateReplySubmitState();
       }
     }
@@ -4114,8 +4139,14 @@
       repliesListenerNoteId = null;
     }
 
-    function applyRepliesForNote(noteId, replies) {
-      const sorted = sortReplies(replies);
+  function applyRepliesForNote(noteId, replies) {
+      // 保留本地尚未確認的回覆（剛樂觀新增但 Firebase 還沒回來的）
+      const cached = repliesCache.get(noteId) || [];
+      const pendingLocal = cached.filter((r) =>
+        r._pending && !replies.some((s) => s.id === r.id)
+      );
+
+      const sorted = sortReplies([...pendingLocal, ...replies]);
       repliesCache.set(noteId, sorted);
       if (selectedNote?.id !== noteId) return;
       selectedReplies = sorted;
