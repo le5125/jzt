@@ -3262,7 +3262,7 @@
       ensureNotesLoaded().then(() => {
         const sorted = applyFilter(notes)
         .map((note) => ({ note, distance: distanceMeters(currentLocation, note.location) }))
-        .sort((a, b) => a.distance - b.distance)
+        .sort((a, b) => new Date(getNoteActivityTime(b.note)) - new Date(getNoteActivityTime(a.note)))
         .slice(0, 50);
 
       els.nearbyList.innerHTML = "";
