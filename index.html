@@ -2046,7 +2046,6 @@
     let selectedNote = null;
     let sheetReturnContext = null;
     let selectedReplies = [];
-    let selectedThrowImages = [];
     let repliesCache = new Map();
     let repliesUnsubscribe = null;
     let repliesListenerNoteId = null;
@@ -2777,12 +2776,11 @@
       updateReplySubmitState();
     });
     els.replyInput.addEventListener("compositionend", updateReplySubmitState);
-  els.replyForm.addEventListener("submit", (event) => {
+    els.replyForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const content = els.replyInput.value.trim().slice(0, 140);
       if (!content || !selectedNote || replyingInProgress) return;
-      // 不 await！立刻關抽屜，讓 submitReply 在背景跑
-      submitReply({ type: "text", content });
+      await submitReply({ type: "text", content });
       els.replyInput.value = "";
       els.replyCountText.textContent = "140 字";
       updateReplySubmitState();
@@ -3361,20 +3359,31 @@
       }
     }
 
+    function getUnpickedNotes() {
+      return normalizeNotes(notes).filter((note) =>
+        !isMyNote(note) && !hasPickedNoteBefore(note.id)
+      );
+    }
+
     function getNearbyUnpickedNotes() {
-      return normalizeNotes(applyFilter(notes)).filter((note) =>
-        !isMyNote(note) &&
-        !hasPickedNoteBefore(note.id) &&
+      return getUnpickedNotes().filter((note) =>
         distanceMeters(currentLocation, note.location) <= NEARBY_RADIUS_METERS
       );
     }
 
     function updateNearbyAlert() {
-      const nearby = getNearbyUnpickedNotes();
-      if (nearby.length > 0) {
-        els.nearbyAlert.textContent = nearby.length === 1
-          ? "附近有一張紙條，點我撿起"
-          : `附近有 ${nearby.length} 張紙條，點我撿起`;
+      const unpicked = getUnpickedNotes();
+      const nearbyUnpicked = getNearbyUnpickedNotes();
+      if (unpicked.length > 0) {
+        if (nearbyUnpicked.length > 0) {
+          els.nearbyAlert.textContent = nearbyUnpicked.length === 1
+            ? "附近有 1 張未撿紙條，點我撿起"
+            : `附近有 ${nearbyUnpicked.length} 張未撿紙條，點我撿起`;
+        } else {
+          els.nearbyAlert.textContent = unpicked.length === 1
+            ? "有 1 張未撿紙條，點我查看"
+            : `有 ${unpicked.length} 張未撿紙條，點我查看`;
+        }
         els.nearbyAlert.classList.add("show");
       } else {
         els.nearbyAlert.classList.remove("show");
@@ -3436,21 +3445,22 @@
 
     function pickNearestNote() {
       clearPickReturnContext();
-      const nearest = notes
-        .filter((note) => !isMyNote(note) && !hasPickedNoteBefore(note.id))
+      const unpicked = getUnpickedNotes()
         .map((note) => ({
           note,
           distance: distanceMeters(currentLocation, note.location)
         }))
-        .filter((item) => item.distance <= NEARBY_RADIUS_METERS)
-        .sort((a, b) => a.distance - b.distance)[0];
+        .sort((a, b) => a.distance - b.distance);
 
-      if (!nearest) {
-        showToast("附近暫時沒有紙條");
+      const nearestNearby = unpicked.find((item) => item.distance <= NEARBY_RADIUS_METERS);
+      const target = nearestNearby || unpicked[0];
+
+      if (!target) {
+        showToast("目前沒有未撿的紙條");
         return;
       }
 
-      pickNote(nearest.note);
+      pickNote(target.note);
     }
 
     async function pickNote(noteOrId) {
@@ -3548,82 +3558,69 @@
       els.pickedContent.appendChild(text);
     }
 
-async function submitReply(reply) {
+    async function submitReply(reply) {
       if (!selectedNote || replyingInProgress) return;
 
       replyingInProgress = true;
       updateReplySubmitState();
+      const prevSubmitLabel = els.submitReplyButton.textContent;
+      els.submitReplyButton.textContent = "送出中…";
 
-      const targetNote = selectedNote;
-      const tempId = crypto.randomUUID();
+      const clientReplyId = crypto.randomUUID();
       const newReply = {
-        id: tempId,
+        id: clientReplyId,
+        clientReplyId,
         authorUid: currentUserId,
         type: reply.type,
         content: reply.content,
-        createdAt: new Date().toISOString(),
-        _pending: true
+        createdAt: new Date().toISOString()
       };
 
-      // 樂觀更新：先在本地顯示
-      const existing = repliesCache.get(targetNote.id) || [];
-      const merged = [newReply, ...existing.filter((r) => r.id !== tempId)];
-      repliesCache.set(targetNote.id, merged);
-      if (selectedNote?.id === targetNote.id) {
-        selectedReplies = merged;
-        updateReplyEntryCount();
-        renderReplies();
-      }
-      showToast("已送出");
+      const optimisticId = newReply.id;
+
+      selectedReplies.unshift(newReply);
+      repliesCache.set(selectedNote.id, [...selectedReplies]);
+      updateReplyEntryCount();
+      renderReplies();
 
       try {
-        // ★ 拿回 Firestore 給的真實 id
-        const realId = await saveReply(targetNote, { ...newReply, id: tempId });
-
-        // 更新紙條計數
-        targetNote.replyCount = (targetNote.replyCount || 0) + 1;
-        targetNote.lastActivityAt = newReply.createdAt;
-        const noteIndex = notes.findIndex((item) => item.id === targetNote.id);
+        await saveReply(selectedNote, newReply);
+        const savedId = newReply.id;
+        selectedReplies = dedupeReplies(
+          selectedReplies.map((item) => (item === newReply || item.id === savedId ? { ...newReply } : item))
+        );
+        repliesCache.set(selectedNote.id, [...selectedReplies]);
+        selectedNote.replyCount = (selectedNote.replyCount || 0) + 1;
+        selectedNote.lastActivityAt = newReply.createdAt;
+        const noteIndex = notes.findIndex((item) => item.id === selectedNote.id);
         if (noteIndex >= 0) {
-          notes[noteIndex] = { ...notes[noteIndex], ...targetNote };
+          notes[noteIndex] = { ...notes[noteIndex], ...selectedNote };
           notes = sortNotesByActivity(notes);
           saveNotesCache();
         }
-
-        // ★★ 關鍵：把本地那則的 id 換成 Firestore 的 id
-        // 這樣等下 onSnapshot 回來時，去重邏輯能認出「這是同一則」
-        const cached = repliesCache.get(targetNote.id) || [];
-        const updated = cached.map((r) =>
-          r.id === tempId ? { ...r, id: realId, _pending: false } : r
-        );
-        repliesCache.set(targetNote.id, updated);
-
-        if (selectedNote?.id === targetNote.id) {
-          selectedReplies = updated;
-          els.pickedCount.textContent = `${targetNote.pickedCount} 次`;
-          updatePickedTimes(targetNote);
-          updateReplyEntryCount();
-          renderReplies();
-        }
+        els.pickedCount.textContent = `${selectedNote.pickedCount} 次`;
+        updatePickedTimes(selectedNote);
+        updateReplyEntryCount();
+        renderReplies();
         renderNotes();
         updateReplyAlert();
+        showToast("已送出回覆");
       } catch (error) {
         console.error("[回覆] 送出失敗", error);
-        // 失敗：移除本地那則
-        const cached = repliesCache.get(targetNote.id) || [];
-        const rolled = cached.filter((item) => item.id !== tempId);
-        repliesCache.set(targetNote.id, rolled);
-        if (selectedNote?.id === targetNote.id) {
-          selectedReplies = rolled;
-          renderReplies();
-          updateReplyEntryCount();
-        }
+        selectedReplies = selectedReplies.filter((item) =>
+          item.id !== optimisticId && item.id !== newReply.id && item.clientReplyId !== clientReplyId
+        );
+        repliesCache.set(selectedNote.id, [...selectedReplies]);
+        renderReplies();
+        updateReplyEntryCount();
         showToast(error?.message?.includes("逾時") ? error.message : "回覆失敗，請稍後再試");
       } finally {
         replyingInProgress = false;
+        els.submitReplyButton.textContent = prevSubmitLabel;
         updateReplySubmitState();
       }
     }
+
     function renderReplies() {
       els.replyList.innerHTML = "";
       if (!selectedReplies.length) {
@@ -4069,14 +4066,14 @@ async function submitReply(reply) {
       await deleteDoc(doc(db, "notes", note.id));
     }
 
-  async function saveReply(note, reply) {
+    async function saveReply(note, reply) {
       if (!hasFirebase || note.id.startsWith("seed-")) {
         const key = `jzt_replies_${note.id}`;
         const saved = JSON.parse(localStorage.getItem(key) || "[]");
         saved.unshift(reply);
         localStorage.setItem(key, JSON.stringify(saved));
         note.lastActivityAt = reply.createdAt;
-        return reply.id;
+        return;
       }
 
       await ensureAuth();
@@ -4090,17 +4087,19 @@ async function submitReply(reply) {
         updateDoc
       } = firebaseApi.firestoreModule;
 
-      // ★ 接住 Firestore 給的 docRef，把它的 id 回傳出去
-      const docRef = await withTimeout(
+      await withTimeout(
         addDoc(collection(db, "notes", note.id, "replies"), {
           authorUid: currentUserId,
           type: reply.type,
           content: reply.content,
+          clientReplyId: reply.clientReplyId || reply.id,
           createdAt: serverTimestamp()
         }),
         10000,
         "回覆送出逾時，請稍後再試"
-      );
+      ).then((docRef) => {
+        reply.id = docRef.id;
+      });
 
       try {
         await withTimeout(
@@ -4114,13 +4113,13 @@ async function submitReply(reply) {
       } catch (err) {
         console.warn("[回覆] 計數更新失敗，回覆內容已儲存", err);
       }
-
-      return docRef.id;   // ★ 把真實 Firestore id 給呼叫端
     }
+
     function mapReplyDoc(doc) {
       const data = doc.data();
       return {
         id: doc.id,
+        clientReplyId: data.clientReplyId || null,
         authorUid: data.authorUid,
         type: data.type,
         content: data.content,
@@ -4128,8 +4127,39 @@ async function submitReply(reply) {
       };
     }
 
+    function isSameReply(a, b) {
+      if (!a || !b) return false;
+      if (a.id && b.id && a.id === b.id) return true;
+      if (a.clientReplyId && b.id && a.clientReplyId === b.id) return true;
+      if (b.clientReplyId && a.id && b.clientReplyId === a.id) return true;
+      if (a.clientReplyId && b.clientReplyId && a.clientReplyId === b.clientReplyId) return true;
+      return a.authorUid === b.authorUid &&
+        a.content === b.content &&
+        Math.abs(new Date(a.createdAt) - new Date(b.createdAt)) < 120000;
+    }
+
     function sortReplies(replies) {
       return [...replies].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    }
+
+    /** 合併樂觀更新與 Firebase 回覆，避免同一則顯示兩次 */
+    function dedupeReplies(replies) {
+      const kept = [];
+      for (const reply of sortReplies(replies)) {
+        const duplicate = kept.find((item) => isSameReply(item, reply));
+        if (!duplicate) {
+          kept.push(reply);
+          continue;
+        }
+        const preferCurrent = String(reply.id || "").length >= String(duplicate.id || "").length
+          ? reply
+          : duplicate;
+        kept[kept.indexOf(duplicate)] = {
+          ...preferCurrent,
+          clientReplyId: preferCurrent.clientReplyId || duplicate.clientReplyId || reply.clientReplyId || null
+        };
+      }
+      return sortReplies(kept);
     }
 
     function stopRepliesListener() {
@@ -4141,14 +4171,15 @@ async function submitReply(reply) {
       repliesListenerNoteId = null;
     }
 
-  function applyRepliesForNote(noteId, replies) {
-      // 保留本地尚未確認的回覆（剛樂觀新增但 Firebase 還沒回來的）
-      const cached = repliesCache.get(noteId) || [];
-      const pendingLocal = cached.filter((r) =>
-        r._pending && !replies.some((s) => s.id === r.id)
-      );
-
-      const sorted = sortReplies([...pendingLocal, ...replies]);
+    function applyRepliesForNote(noteId, replies) {
+      const pending = selectedNote?.id === noteId
+        ? selectedReplies.filter((item) =>
+          replyingInProgress &&
+          item.authorUid === currentUserId &&
+          !replies.some((remote) => isSameReply(remote, item))
+        )
+        : [];
+      const sorted = dedupeReplies([...replies, ...pending]);
       repliesCache.set(noteId, sorted);
       if (selectedNote?.id !== noteId) return;
       selectedReplies = sorted;
@@ -4738,6 +4769,7 @@ async function submitReply(reply) {
           (userSnap.data().pickedNoteIds || []).forEach((noteId) => pickedNoteIds.add(noteId));
         }
         savePickedNotesLocal();
+        updateNearbyAlert();
       } catch (err) {
         console.warn("[撿記錄] Firebase 讀取失敗，使用本機", err);
       }
