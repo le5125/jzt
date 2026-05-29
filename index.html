@@ -1662,7 +1662,7 @@
     <!-- 附近紙條列表抽屜 -->
     <section id="nearbySheet" class="sheet" aria-label="附近紙條">
       <header class="sheet-header">
-        <h2>全台紙條</h2>
+        <h2>世界紙條</h2>
         <button class="close-button" type="button" data-close>×</button>
       </header>
       <div id="nearbyList" class="note-list"></div>
@@ -1956,6 +1956,7 @@
     let replyingInProgress = false;
     let notesUnsubscribe = null;
     let notesListenerToken = 0;
+    let selectedNoteUnsubscribe = null;
 
     function getRegisteredAuthorUids() {
       try {
@@ -2238,6 +2239,9 @@
     function fixMapSize(label) {
       map.invalidateSize();
       console.log(`[地圖] invalidateSize 觸發 (${label})`);
+      requestAnimationFrame(() => {
+        if (markersLayer) renderNotes();
+      });
     }
 
     function dismissSplash() {
@@ -2420,6 +2424,10 @@
       if (docs.length > 0 && !all.length) {
         console.error("[紙條] 有資料但無法解析 location，請檢查 notes 文件");
       }
+      replaceNotesList(all);
+    }
+
+    function replaceNotesList(all) {
       const filtered = all.filter((item) => (item.reportCount || 0) < 3 || isMyNote(item));
       notes = sortNotesByActivity(filtered);
       filtered.forEach((note) => {
@@ -2428,18 +2436,25 @@
       if (notes.length) saveNotesCache();
       renderNotes();
       updateReplyAlert();
-      enrichNotesWithPickCounts(notes).then((changed) => {
-        if (!changed) return;
-        saveNotesCache();
-        renderNotes();
-        if (selectedNote) {
-          const fresh = notes.find((item) => item.id === selectedNote.id);
-          if (fresh) {
-            selectedNote.pickedCount = fresh.pickedCount;
-            if (els.pickedCount) els.pickedCount.textContent = `${fresh.pickedCount || 0} 次`;
-          }
-        }
-      });
+      updateNearbyAlert();
+      void refreshPickCounts();
+    }
+
+    async function refreshPickCounts() {
+      const changed = await enrichNotesWithPickCounts(notes);
+      if (!changed) return;
+      saveNotesCache();
+      renderNotes();
+      refreshOpenNoteViews();
+    }
+
+    function refreshOpenNoteViews() {
+      if (els.nearbySheet?.classList.contains("open")) {
+        renderNearbyList();
+      }
+      if (selectedNote && els.pickSheet?.classList.contains("open") && els.pickedCount) {
+        els.pickedCount.textContent = `${selectedNote.pickedCount || 0} 次`;
+      }
     }
 
     async function enrichNotesWithPickCounts(notesList) {
@@ -2482,8 +2497,21 @@
       await ensureAuth();
       if (token !== notesListenerToken) return;
 
-      const { onSnapshot } = firebaseApi.firestoreModule;
+      const { onSnapshot, getDocs } = firebaseApi.firestoreModule;
       const q = buildNotesQuery();
+
+      // LINE WebView 的 onSnapshot 常收不到第一筆，先用 getDocs 立即拉資料
+      try {
+        const snapshot = await getDocs(q);
+        if (token === notesListenerToken && snapshot.docs.length) {
+          console.log(`[紙條] 首次載入 ${snapshot.docs.length} 筆`);
+          setNotesFromFirestoreDocs(snapshot.docs);
+        }
+      } catch (err) {
+        console.warn("[紙條] 首次載入失敗", err);
+      }
+
+      if (token !== notesListenerToken) return;
 
       notesUnsubscribe = onSnapshot(
         q,
@@ -2506,19 +2534,39 @@
       if (!hasFirebase) return;
       await ensureAuth();
       try {
-        const loaded = await loadFirebaseNotes();
-        if (loaded.length > 0) {
-          notes = loaded;
-          saveNotesCache();
+        const { getDocs } = firebaseApi.firestoreModule;
+        const snapshot = await getDocs(buildNotesQuery());
+        if (snapshot.docs.length > 0) {
+          setNotesFromFirestoreDocs(snapshot.docs);
         } else if (!notes.length) {
           applyNotesCache();
+          renderNotes();
+          updateReplyAlert();
+          updateNearbyAlert();
         }
       } catch (error) {
         console.error("[紙條] 單次載入失敗", error);
-        if (!notes.length) applyNotesCache();
+        if (!notes.length) {
+          applyNotesCache();
+          renderNotes();
+          updateReplyAlert();
+          updateNearbyAlert();
+        }
       }
-      renderNotes();
-      updateReplyAlert();
+    }
+
+    async function refreshNotesFromFirebase() {
+      if (!hasFirebase) {
+        renderNotes();
+        return;
+      }
+      try {
+        await fetchNotesOnce();
+        await refreshPickCounts();
+      } catch (err) {
+        console.warn("[紙條] 重新整理失敗", err);
+        renderNotes();
+      }
     }
 
     async function ensureNotesLoaded() {
@@ -2714,6 +2762,23 @@
     revealApp();
 
     window.addEventListener("resize", () => fixMapSize("resize"));
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible") return;
+      fixMapSize("visible");
+      void refreshNotesFromFirebase();
+      if (selectedNote && els.pickSheet?.classList.contains("open")) {
+        void syncPickCount(selectedNote).then((count) => {
+          if (els.pickedCount) els.pickedCount.textContent = `${count} 次`;
+        });
+      }
+    });
+
+    window.addEventListener("pageshow", (event) => {
+      if (!event.persisted) return;
+      fixMapSize("pageshow");
+      void refreshNotesFromFirebase();
+    });
 
     els.cityButton.addEventListener("click", () => openSheet("city"));
     els.locateButton.addEventListener("click", locateMe);
@@ -3160,6 +3225,7 @@
       closeReplyComposeDrawer();
       if (except !== "pick" && except !== "replies") {
         stopRepliesListener();
+        stopSelectedNoteListener();
         clearPickReturnContext();
       }
       const keep = typeof except === "string" ? except : null;
@@ -3260,42 +3326,48 @@
       els.nearbyList.innerHTML = '<p class="muted">載入中…</p>';
 
       ensureNotesLoaded().then(() => {
-        const sorted = applyFilter(notes)
+        renderNearbyList();
+        void refreshPickCounts();
+      });
+    }
+
+    function renderNearbyList() {
+      const sorted = applyFilter(notes)
         .map((note) => ({ note, distance: distanceMeters(currentLocation, note.location) }))
         .sort((a, b) => new Date(getNoteActivityTime(b.note)) - new Date(getNoteActivityTime(a.note)))
         .slice(0, 50);
 
       els.nearbyList.innerHTML = "";
       if (sorted.length === 0) {
-        els.nearbyList.innerHTML = '<p class="muted">全台還沒有紙條。</p>';
-      } else {
-        sorted.forEach(({ note, distance }) => {
-          const isMine = isMyNote(note);
-          const card = document.createElement("article");
-          card.className = "note-card";
-          card.style.cursor = "pointer";
-
-          if (noteHasImage(note)) {
-            appendNoteImages(card, note);
-          }
-
-          const p = document.createElement("p");
-          p.textContent = note.content || "圖片紙條";
-          card.appendChild(p);
-
-          const meta = document.createElement("span");
-          meta.className = "muted";
-          const distText = distance < 1000 ? `${Math.round(distance)} 公尺` : `${(distance / 1000).toFixed(1)} 公里`;
-          meta.textContent = `${isMine ? "📜 我的" : "📃 " + nicknameOf(note.authorUid, note)} · ${note.city || "—"} · ${distText} · 被撿起 ${note.pickedCount} 次 · ${formatNoteTimesMeta(note)}`;
-          card.appendChild(meta);
-
-          card.addEventListener("click", () => {
-            setPickReturnContext("nearby");
-            pickNote(note);
-          });
-          els.nearbyList.appendChild(card);
-        });
+        els.nearbyList.innerHTML = '<p class="muted">還沒有紙條。</p>';
+        return;
       }
+
+      sorted.forEach(({ note, distance }) => {
+        const isMine = isMyNote(note);
+        const card = document.createElement("article");
+        card.className = "note-card";
+        card.style.cursor = "pointer";
+
+        if (noteHasImage(note)) {
+          appendNoteImages(card, note);
+        }
+
+        const p = document.createElement("p");
+        p.textContent = note.content || "圖片紙條";
+        card.appendChild(p);
+
+        const meta = document.createElement("span");
+        meta.className = "muted";
+        const distText = distance < 1000 ? `${Math.round(distance)} 公尺` : `${(distance / 1000).toFixed(1)} 公里`;
+        meta.textContent = `${isMine ? "📜 我的" : "📃 " + nicknameOf(note.authorUid, note)} · ${note.city || "—"} · ${distText} · 被撿起 ${note.pickedCount || 0} 次 · ${formatNoteTimesMeta(note)}`;
+        card.appendChild(meta);
+
+        card.addEventListener("click", () => {
+          setPickReturnContext("nearby");
+          pickNote(note);
+        });
+        els.nearbyList.appendChild(card);
       });
     }
 
@@ -3492,6 +3564,7 @@
       updateReplyEntryCount();
       updateReplySubmitState();
       void startRepliesListener(note);
+      startSelectedNoteListener(note);
 
       try {
         const count = await (async () => {
@@ -4343,6 +4416,45 @@
       return snapshot.size;
     }
 
+    function stopSelectedNoteListener() {
+      if (selectedNoteUnsubscribe) {
+        selectedNoteUnsubscribe();
+        selectedNoteUnsubscribe = null;
+      }
+    }
+
+    function startSelectedNoteListener(note) {
+      stopSelectedNoteListener();
+      if (!hasFirebase || !note?.id || note.id.startsWith("seed-")) return;
+
+      const noteId = note.id;
+      const { doc, onSnapshot } = firebaseApi.firestoreModule;
+      selectedNoteUnsubscribe = onSnapshot(
+        doc(db, "notes", noteId),
+        (snap) => {
+          if (!snap.exists() || selectedNote?.id !== noteId) return;
+          const data = snap.data();
+          const count = data.pickedCount || 0;
+          const replyCount = data.replyCount || 0;
+          note.pickedCount = count;
+          note.replyCount = replyCount;
+          selectedNote.pickedCount = count;
+          selectedNote.replyCount = replyCount;
+          const idx = notes.findIndex((item) => item.id === noteId);
+          if (idx >= 0) {
+            notes[idx].pickedCount = count;
+            notes[idx].replyCount = replyCount;
+          }
+          if (els.pickSheet?.classList.contains("open") && els.pickedCount) {
+            els.pickedCount.textContent = `${count} 次`;
+          }
+          updateReplyEntryCount();
+          saveNotesCache();
+        },
+        (err) => console.warn("[紙條] 即時監聽失敗", err)
+      );
+    }
+
     /** 從 notes 文件讀 pickedCount，並以 note_picks 統計補舊資料 */
     async function syncPickCount(note) {
       if (!note?.id) return 0;
@@ -4355,13 +4467,11 @@
         const snap = await getDoc(doc(db, "notes", note.id));
         let count = snap.exists() ? (snap.data().pickedCount || 0) : (note.pickedCount || 0);
 
-        if (count === 0) {
-          try {
-            const fromPicks = await getPickCountForNote(note.id);
-            if (fromPicks > count) count = fromPicks;
-          } catch (err) {
-            console.warn("[撿取] note_picks 統計失敗", err);
-          }
+        try {
+          const fromPicks = await getPickCountForNote(note.id);
+          if (fromPicks > count) count = fromPicks;
+        } catch (err) {
+          console.warn("[撿取] note_picks 統計失敗", err);
         }
 
         note.pickedCount = count;
