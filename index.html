@@ -2056,6 +2056,8 @@
     let markersLayer = null;
     let userMarker = null;
     let pickedNoteIds = new Set();
+    let selectedThrowImages = [];
+    let throwingInProgress = false;
 
     let nicknameEditing = false;
     let nicknameDraftBeforeEdit = "";
@@ -2949,6 +2951,7 @@
       els.countText.textContent = `${left} 字`;
       updateThrowButton();
     });
+    els.noteInput.addEventListener("compositionend", updateThrowButton);
 
     function renderImagePreviews() {
       els.imagePreviewRow.innerHTML = "";
@@ -2999,8 +3002,9 @@
 
     els.throwForm.addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (throwingInProgress) return;
       const content = els.noteInput.value.trim().slice(0, 140);
-      const imageFile = selectedThrowImages[0] || null;
+      const imageFile = getThrowImageFile();
       if (!content && !imageFile) return;
 
       const today = new Date().toISOString().slice(0, 10);
@@ -3036,6 +3040,8 @@
       };
 
       try {
+        throwingInProgress = true;
+        updateThrowButton();
         els.submitNoteButton.disabled = true;
 
         if (imageFile) {
@@ -3085,6 +3091,7 @@
         const msg = error?.message || "未知錯誤";
         showToast(`扔失敗：${msg}`);
       } finally {
+        throwingInProgress = false;
         els.submitNoteButton.textContent = "扔出去";
         updateThrowButton();
       }
@@ -3118,10 +3125,27 @@
       });
     });
 
+    function getThrowImageFile() {
+      if (selectedThrowImages[0]) return selectedThrowImages[0];
+      const file = (els.imageInput?.files || [])[0];
+      if (file) {
+        selectedThrowImages = [file];
+        renderImagePreviews();
+      }
+      return file || null;
+    }
+
     function updateThrowButton() {
       const hasText = els.noteInput.value.trim().length > 0;
-      const hasImage = selectedThrowImages.length > 0;
-      els.submitNoteButton.disabled = !hasText && !hasImage;
+      const hasImage = Boolean(getThrowImageFile());
+      const usage = getDailyUsage();
+      const canThrow = usage.throwCount < DAILY_LIMIT;
+      els.submitNoteButton.disabled = throwingInProgress || ((!hasText && !hasImage) || !canThrow);
+      if (!canThrow && (hasText || hasImage)) {
+        els.submitNoteButton.title = `今日已用完 ${DAILY_LIMIT} 次`;
+      } else {
+        els.submitNoteButton.removeAttribute("title");
+      }
     }
 
     function appendNoteImages(container, note) {
@@ -3242,7 +3266,11 @@
       closeSheets(name);
       [els.throwSheet, els.pickSheet, els.citySheet, els.nearbySheet, els.myNotesPage, els.replySheet]
         .forEach(resetSheetVisual);
-      if (name === "throw") els.throwSheet.classList.add("open");
+      if (name === "throw") {
+        els.throwSheet.classList.add("open");
+        updateThrowRemainingLabel();
+        updateThrowButton();
+      }
       if (name === "pick") els.pickSheet.classList.add("open");
       if (name === "city") els.citySheet.classList.add("open");
       if (name === "nearby") els.nearbySheet.classList.add("open");
